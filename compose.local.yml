@@ -1,0 +1,74 @@
+name: kekerides-local
+
+services:
+  
+  api-staging:
+    build: 
+      context: ./
+      target: production
+    restart: unless-stopped
+    env_file: .env.staging
+    ports:
+      - '4010:4010'
+    environment:
+      - NODE_ENV=staging
+      - PORT=4010
+    depends_on:
+      redis: 
+        condition: service_healthy
+    networks:
+      - kekerides-network
+
+# Main/Production environment on port 4011
+  api-main: 
+    build: 
+      context: ./
+      target: production
+    restart: unless-stopped
+    env_file: .env.main
+    ports:
+      - '4011:4010'
+    environment: 
+      - NODE_ENV=production
+      - PORT=4010
+    depends_on:
+      redis: 
+        condition: service_healthy
+    networks: 
+      - kekerides-network
+
+# nginx:
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+    volumes:
+     - ./nginx.local.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-staging
+      - api-main
+    networks:
+      - kekerides-network
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass redis_password_dev
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--raw', 'incr', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kekerides-network
+
+volumes:
+  redis_data:
+
+networks:
+  kekerides-network:
+    driver: bridge
