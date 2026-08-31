@@ -60,7 +60,7 @@ jobs:
           envs: IMAGE_TAG
 
           script: |
-            cd /root/var/www/kekerides_nestjs_backend
+            cd /root/var/www/arkrides_nestjs_backend
 
             echo "${{ secrets.ENV_STAGING }}" > .env
 
@@ -89,7 +89,7 @@ jobs:
           envs: IMAGE_TAG
           
           script: |
-            cd /root/var/www/kekerides_nestjs_backend
+            cd /root/var/www/arkrides_nestjs_backend
             
             echo "${{ secrets.ENV_MAIN }}" > .env
 

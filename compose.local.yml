@@ -1,4 +1,4 @@
-name: kekerides-local
+name: arkrides-local
 
 services:
   
@@ -17,7 +17,7 @@ services:
       redis: 
         condition: service_healthy
     networks:
-      - kekerides-network
+      - arkrides-network
 
 # Main/Production environment on port 4011
   api-main: 
@@ -35,7 +35,7 @@ services:
       redis: 
         condition: service_healthy
     networks: 
-      - kekerides-network
+      - arkrides-network
 
 # nginx:
   nginx:
@@ -49,7 +49,7 @@ services:
       - api-staging
       - api-main
     networks:
-      - kekerides-network
+      - arkrides-network
 
   redis:
     image: redis:7-alpine
@@ -64,11 +64,11 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - kekerides-network
+      - arkrides-network
 
 volumes:
   redis_data:
 
 networks:
-  kekerides-network:
+  arkrides-network:
     driver: bridge

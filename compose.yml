@@ -2,11 +2,11 @@
 services:
 
   api: 
-    image: ${IMAGE_TAG:-kekerides-api:latest}
+    image: ${IMAGE_TAG:-arkrides-api:latest}
     build:
       context: ./
       target: production
-    container_name: kekerides-api
+    container_name: arkrides-api
     restart: unless-stopped
     env_file: .env
     ports:
