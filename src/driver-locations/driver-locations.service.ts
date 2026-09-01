@@ -9,11 +9,14 @@ import { Repository, In } from 'typeorm';
 import { Redis } from 'ioredis';
 import { Driver } from '../drivers/entities/driver.entity';
 import { UpdateLocationDto } from './dto/update-location.dto';
-import { 
-  REDIS_CLIENT, 
-  DRIVER_LOCATION_GEO_KEY, 
-  DRIVER_ACTIVE_PREFIX 
+import {
+  REDIS_CLIENT,
+  DRIVER_LOCATION_GEO_KEY,
+  DRIVER_ACTIVE_PREFIX,
+  DRIVER_ACTIVE_RIDE_PREFIX,
 } from '../redis/redis.constants';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { RIDE_EVENTS } from '../websocket/events/ride-events.constants';
 
 /**
  * DriverLocationsService
@@ -33,6 +36,9 @@ export class DriverLocationsService {
 
     // Inject our high-speed Redis client
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+
+    // Realtime location push to the rider watching the map
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -73,11 +79,28 @@ export class DriverLocationsService {
     const activeKey = `${DRIVER_ACTIVE_PREFIX}${driverId}`;
     await this.redis.set(activeKey, 'active', 'EX', 300);
 
+    const updatedAt = new Date();
+
+    // STEP 4: If this driver is mid-ride, push the position straight to the
+    // rider watching the map. The active-ride pointer is kept in Redis by
+    // RidesService so a GPS ping never costs a database round trip.
+    const rideId = await this.redis.get(`${DRIVER_ACTIVE_RIDE_PREFIX}${driverId}`);
+
+    if (rideId) {
+      this.eventEmitter.emit(RIDE_EVENTS.DRIVER_LOCATION_UPDATED, {
+        driverId,
+        rideId,
+        latitude,
+        longitude,
+        updatedAt,
+      });
+    }
+
     return {
       driverId,
       latitude,
       longitude,
-      updatedAt: new Date(),
+      updatedAt,
     };
   }
 

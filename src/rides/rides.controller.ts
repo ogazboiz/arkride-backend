@@ -295,6 +295,25 @@ export class RidesController {
   }
 
   /**
+   * Transparent fare breakdown for a ride (95% driver / 4% platform / 1% rider)
+   * GET /api/v1/rides/:id/breakdown
+   * @param id - Ride UUID
+   * @returns The revenue split — from the ledger once the ride is settled
+   */
+  @Get(':id/breakdown')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get the revenue split for a ride' })
+  async getFareBreakdown(@Param('id') id: string, @Request() req: any) {
+    return await this.ridesService.getFareBreakdown(
+      id,
+      req.user.id,
+      req.user.role === Role.ADMIN,
+    );
+  }
+
+  /**
    * Get a single ride by ID
    * GET /api/v1/rides/:id
    * @param id - Ride UUID

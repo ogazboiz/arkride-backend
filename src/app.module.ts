@@ -17,6 +17,12 @@ import { CommonModule } from './common/common.module';
 import { REDIS_CLIENT } from './redis/redis.constants';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { LedgerModule } from './ledger/ledger.module';
+import { WebsocketModule } from './websocket/websocket.module';
+import { WalletModule } from './wallet/wallet.module';
+import { EmergencyModule } from './emergency/emergency.module';
+import { BookingChannelsModule } from './booking-channels/booking-channels.module';
 
 @Module({
   imports: [
@@ -28,6 +34,15 @@ import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis'
 
     // Initialize shared common services (Email, etc.)
     CommonModule,
+
+    /**
+     * Domain Events
+     *
+     * Services emit ride lifecycle events here and the websocket gateway
+     * listens. This indirection is what lets realtime updates happen without
+     * the domain layer ever importing the transport layer.
+     */
+    EventEmitterModule.forRoot(),
 
     /**
      * Rate Limiting Configuration (Throttler)
@@ -58,6 +73,13 @@ import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis'
     VehiclesModule,
     RidesModule,
     DriverLocationsModule,
+    LedgerModule,
+    WalletModule,
+    EmergencyModule,
+    BookingChannelsModule,
+
+    // Realtime transport (leaf module — nothing imports it)
+    WebsocketModule,
   ],
   controllers: [AppController],
   providers: [AppService, DatabaseService],

@@ -7,6 +7,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { DecaneAuthDto } from './dto/decane-auth.dto';
 import { Throttle } from '@nestjs/throttler';
 import { ApiBadRequestResponse, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
@@ -70,6 +71,16 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'Invalid reset payload or OTP.' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Post('decane')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Authenticate with Decane Access Token' })
+  @ApiBody({ type: DecaneAuthDto })
+  @ApiOkResponse({ description: 'Decane authentication successful. Returns app JWT session and wallet info.' })
+  @ApiBadRequestResponse({ description: 'Invalid Decane token or verification failed.' })
+  async decaneAuth(@Body() dto: DecaneAuthDto) {
+    return this.authService.authenticateWithDecane(dto);
   }
 
   //   @Post('google')

@@ -33,6 +33,20 @@ export enum RideCategory {
   PRIVATE = 'private', // Whole Keke
   SHARED = 'shared',   // Shared Keke (max 4 people)
   OKADA = 'okada',     // Motorcycle
+  CAR = 'car',         // Car (exclusive, like Private)
+}
+
+/**
+ * Where a ride was booked from.
+ *
+ * Kept for attribution: the omnichannel entry points (a WhatsApp agent, a voice
+ * IVR) funnel into the same booking path as the app, so without this column
+ * there would be no way to tell afterwards which channel actually drove volume.
+ */
+export enum RideOriginChannel {
+  APP = 'app',
+  WHATSAPP = 'whatsapp',
+  VOICE = 'voice',
 }
 
 /**
@@ -115,6 +129,14 @@ export class Ride {
     default: RideStatus.REQUESTED,
   })
   status: RideStatus;
+
+  // Which entry point this booking came through (app, WhatsApp agent, voice)
+  @Column({
+    type: 'enum',
+    enum: RideOriginChannel,
+    default: RideOriginChannel.APP,
+  })
+  originChannel: RideOriginChannel;
 
   // Reason for cancellation (if ride was cancelled)
   @Column({ type: 'text', nullable: true })

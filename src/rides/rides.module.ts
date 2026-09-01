@@ -9,15 +9,21 @@ import { Rating } from './entities/rating.entity';
 import { User } from '../users/entities/user.entity';
 import { Driver } from '../drivers/entities/driver.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
+import { LedgerModule } from '../ledger/ledger.module';
 
 /**
  * Rides Module
  * Manages all ride-related functionality
  * Imports User, Driver, and Vehicle entities for relationships and validation
+ *
+ * LedgerModule provides the audit trail the 95/4/1 fare split writes into.
+ * EventEmitter2 is globally available (EventEmitterModule.forRoot in AppModule),
+ * so realtime notification needs no import here.
  */
 @Module({
   imports: [
     TypeOrmModule.forFeature([Ride, Rating, User, Driver, Vehicle]),
+    LedgerModule,
   ],
   controllers: [RidesController, RatingsController],
   providers: [RidesService, RatingsService],

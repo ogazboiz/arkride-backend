@@ -2,83 +2,42 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtStrategy } from './jwt.strategy';
 import { Role } from '../../common/enums/role.enum';
 
+/**
+ * The strategy is now a thin passport wrapper: all identity resolution lives in
+ * AuthResolverService (see auth-resolver.service.spec.ts for those cases), so
+ * what matters here is that the strategy delegates rather than deciding
+ * anything itself — a second implementation is exactly what the extraction
+ * was meant to prevent.
+ */
 describe('JwtStrategy', () => {
   let strategy: JwtStrategy;
-  let usersService: { findById: jest.Mock };
-  let driversService: { findForAuth: jest.Mock };
+  let authResolver: { resolvePrincipal: jest.Mock };
   let configService: { get: jest.Mock };
-  let consoleLogSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    usersService = {
-      findById: jest.fn(),
-    };
-    driversService = {
-      findForAuth: jest.fn(),
-    };
-    configService = {
-      get: jest.fn().mockReturnValue('test-secret'),
-    };
-    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation();
+    authResolver = { resolvePrincipal: jest.fn() };
+    configService = { get: jest.fn().mockReturnValue('test-secret') };
 
-    strategy = new JwtStrategy(
-      usersService as any,
-      driversService as any,
-      configService as any,
+    strategy = new JwtStrategy(authResolver as any, configService as any);
+  });
+
+  it('delegates resolution to AuthResolverService', async () => {
+    const principal = { id: 'driver-id', role: Role.DRIVER };
+    authResolver.resolvePrincipal.mockResolvedValue(principal);
+
+    const payload = { sub: 'driver-id', role: Role.DRIVER, type: 'driver' };
+
+    await expect(strategy.validate(payload)).resolves.toEqual(principal);
+    expect(authResolver.resolvePrincipal).toHaveBeenCalledWith(payload);
+  });
+
+  it('propagates rejection from the resolver', async () => {
+    authResolver.resolvePrincipal.mockRejectedValue(
+      new UnauthorizedException('Invalid driver token'),
     );
-  });
-
-  afterEach(() => {
-    consoleLogSpy.mockRestore();
-  });
-
-  it('validates a driver token against the drivers table', async () => {
-    const driver = {
-      id: 'driver-id',
-      email: 'driver@example.com',
-      role: Role.DRIVER,
-    };
-    driversService.findForAuth.mockResolvedValue(driver);
 
     await expect(
-      strategy.validate({
-        sub: 'driver-id',
-        email: 'driver@example.com',
-        role: Role.DRIVER,
-        type: 'driver',
-      }),
-    ).resolves.toEqual(driver);
-
-    expect(driversService.findForAuth).toHaveBeenCalledWith('driver-id');
-    expect(usersService.findById).not.toHaveBeenCalled();
-  });
-
-  it('rejects a driver token when the driver cannot be resolved', async () => {
-    driversService.findForAuth.mockResolvedValue(null);
-
-    await expect(
-      strategy.validate({
-        sub: 'driver-id',
-        email: 'driver@example.com',
-        role: Role.DRIVER,
-        type: 'driver',
-      }),
+      strategy.validate({ sub: 'driver-id', role: Role.DRIVER, type: 'driver' }),
     ).rejects.toThrow(UnauthorizedException);
-  });
-
-  it('does not treat a user token with driver role as a driver token', async () => {
-    usersService.findById.mockResolvedValue(null);
-
-    await expect(
-      strategy.validate({
-        sub: 'user-id',
-        email: 'user@example.com',
-        role: Role.DRIVER,
-        type: 'user',
-      }),
-    ).rejects.toThrow(UnauthorizedException);
-
-    expect(driversService.findForAuth).not.toHaveBeenCalled();
-    expect(usersService.findById).toHaveBeenCalledWith('user-id');
   });
 });

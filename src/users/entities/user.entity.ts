@@ -34,6 +34,15 @@ export class User {
   providerId: string | null;
 
   @Column({ type: 'varchar', nullable: true })
+  walletAddressEvm: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  walletAddressSolana: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  walletAddressTron: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
   otpCode: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
@@ -54,6 +63,15 @@ export class User {
 
   @Column({ type: 'int', default: 0 })
   totalRides: number;
+
+  /**
+   * Accumulated 1% cashback from completed rides.
+   *
+   * Fast-read cache — the authoritative record of every credit is the
+   * ledger_entries table.
+   */
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  cashbackBalance: number;
 
   @Column({ type: 'boolean', default: false })
   isBlocked: boolean;

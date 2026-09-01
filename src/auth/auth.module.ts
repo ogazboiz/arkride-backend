@@ -8,6 +8,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from '../common/common.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { DecaneService } from './decane.service';
+import { AuthResolverService } from './services/auth-resolver.service';
 
 @Module({
   imports: [ 
@@ -25,7 +27,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy], // EmailService is now in CommonModule
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, JwtStrategy, DecaneService, AuthResolverService],
+  // AuthResolverService is exported for the websocket gateway, which must
+  // resolve socket handshake tokens exactly the way HTTP requests do.
+  exports: [AuthService, JwtModule, DecaneService, AuthResolverService],
 })
 export class AuthModule {}

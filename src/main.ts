@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { createValidationExceptionFactory } from './common/pipes/validation-exception.factory';
@@ -27,6 +28,19 @@ async function bootstrap() {
   );
 
   app.enableCors();
+
+  /**
+   * Realtime transport.
+   *
+   * Note this is Socket.IO's own adapter — the CORS policy for websocket
+   * handshakes is configured on @WebSocketGateway(), NOT by app.enableCors()
+   * above, which only covers Express routes.
+   *
+   * When the app outgrows a single instance, this is the one line that changes:
+   * a custom adapter backed by @socket.io/redis-adapter fans broadcasts out
+   * across every running node (the shared Redis client already exists).
+   */
+  app.useWebSocketAdapter(new IoAdapter(app));
 
   const config = new DocumentBuilder()
     .setTitle("KEKE")

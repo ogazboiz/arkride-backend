@@ -7,10 +7,11 @@ import {
   Min,
   Max,
   IsEnum,
+  IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
-import { RideCategory } from '../entities/ride.entity';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { RideCategory, RideOriginChannel } from '../entities/ride.entity';
 
 /**
  * DTO for location data (pickup or dropoff)
@@ -63,14 +64,29 @@ export class CreateRideDto {
   dropoff: LocationDto;
 
   // The category of ride (Private, Shared, Okada)
-  @ApiProperty({ 
-    enum: RideCategory, 
+  @ApiProperty({
+    enum: RideCategory,
     example: RideCategory.PRIVATE,
-    description: 'The type of service requested (private = whole keke, shared = shared keke, okada = motorcycle)'
+    description: 'The type of service requested (private = whole keke, shared = shared keke, okada = motorcycle, car = car)'
   })
   @IsNotEmpty({ message: 'Ride category is required' })
   @IsEnum(RideCategory, {
-    message: 'Category must be one of: private, shared, okada',
+    message: 'Category must be one of: private, shared, okada, car',
   })
   category: RideCategory;
+
+  /**
+   * Which entry point produced this booking. Optional and defaulted, so
+   * existing app clients are unaffected — only the omnichannel service sets it.
+   */
+  @ApiPropertyOptional({
+    enum: RideOriginChannel,
+    default: RideOriginChannel.APP,
+    description: 'Booking channel, for attribution',
+  })
+  @IsOptional()
+  @IsEnum(RideOriginChannel, {
+    message: 'Origin channel must be one of: app, whatsapp, voice',
+  })
+  originChannel?: RideOriginChannel;
 }

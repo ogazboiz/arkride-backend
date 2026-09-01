@@ -1,18 +1,15 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
-import { UsersService } from '../../users/users.service';
-import { DriversService } from '../../drivers/drivers.service';
-import { Role } from '../../common/enums/role.enum';
+import { AuthResolverService } from '../services/auth-resolver.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   private readonly logger = new Logger(JwtStrategy.name);
 
   constructor(
-    private readonly usersService: UsersService,
-    private readonly driversService: DriversService,
+    private readonly authResolver: AuthResolverService,
     private readonly configService: ConfigService,
   ) {
     super({
@@ -29,31 +26,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       type: payload?.type,
     });
 
-    const { sub, role } = payload;
-
-    // Handle Driver
-    if (payload.type === 'driver' && role === Role.DRIVER) {
-      const driver = await this.driversService.findForAuth(sub);
-      if (!driver) {
-        throw new UnauthorizedException('Invalid driver token');
-      }
-      return { ...driver, role: Role.DRIVER };
-    }
-
-    // Handle Admin (if you have an adminsService, otherwise default to user with admin role)
-    if (role === Role.ADMIN) {
-      const user = await this.usersService.findById(sub);
-      if (!user) {
-        throw new UnauthorizedException('Admin user not found');
-      }
-      return { ...user, role: Role.ADMIN };
-    }
-
-    // Default to User
-    const user = await this.usersService.findById(sub);
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-    return { ...user, role: Role.USER };
+    // Resolution is shared with the websocket gateway so HTTP and realtime
+    // can never disagree about who a token belongs to.
+    return await this.authResolver.resolvePrincipal(payload);
   }
 }

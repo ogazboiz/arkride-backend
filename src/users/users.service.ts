@@ -22,6 +22,21 @@ export class UsersService {
         return this.usersRepository.findOne({ where: { id }})
     }
 
+    async findByProvider(provider: string, providerId: string): Promise<User | null> {
+        return this.usersRepository.findOne({ where: { provider, providerId } });
+    }
+
+    async updateWalletAddresses(
+        userId: string,
+        addresses: { evm?: string | null; solana?: string | null; tron?: string | null },
+    ): Promise<void> {
+        await this.usersRepository.update(userId, {
+            walletAddressEvm: addresses.evm ?? null,
+            walletAddressSolana: addresses.solana ?? null,
+            walletAddressTron: addresses.tron ?? null,
+        });
+    }
+
     async createUser ( userData: Partial<User>): Promise<User> {
         const newUser = this.usersRepository.create(userData);
         return this.usersRepository.save(newUser);

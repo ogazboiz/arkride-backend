@@ -2,6 +2,8 @@ import { Module, Global } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { EmailService } from './services/email.service';
 import { EmailProcessor } from './processors/email.processor';
+import { WebhookService } from './services/webhook.service';
+import { EmergencyWebhookProcessor } from './processors/emergency-webhook.processor';
 
 /**
  * CommonModule
@@ -19,8 +21,19 @@ import { EmailProcessor } from './processors/email.processor';
     BullModule.registerQueue({
       name: 'email',
     }),
+
+    // Outbound emergency webhooks. Same producer/consumer shape as email:
+    // the SOS request path only enqueues, it never waits on a third party.
+    BullModule.registerQueue({
+      name: 'emergency-webhooks',
+    }),
   ],
-  providers: [EmailService, EmailProcessor],
-  exports: [EmailService, BullModule],
+  providers: [
+    EmailService,
+    EmailProcessor,
+    WebhookService,
+    EmergencyWebhookProcessor,
+  ],
+  exports: [EmailService, WebhookService, BullModule],
 })
 export class CommonModule {}
