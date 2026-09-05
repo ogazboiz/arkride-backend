@@ -70,12 +70,6 @@ const RULES: EnvRule[] = [
     because:
       'every access token is signed and verified with it; without it the app would fall back to a public string and accept forged admin tokens',
   },
-  {
-    key: 'REDIS_HOST',
-    scope: 'production',
-    because:
-      'ride locking, driver geo lookups, rate limiting and the job queues all live in Redis',
-  },
 ];
 
 /**
@@ -162,6 +156,16 @@ export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
   ) {
     problems.push(
       'Neither DATABASE_URL nor DATABASE_HOST is set — there is no database to connect to.',
+    );
+  }
+
+  // Redis, like the database, is reachable by URL or by discrete parts.
+  // Managed platforms inject only a URL, so demanding REDIS_HOST specifically
+  // failed deploys on hosts where Redis was running perfectly well.
+  if (!isDevLike && isMissing(env.REDIS_URL) && isMissing(env.REDIS_HOST)) {
+    problems.push(
+      'Neither REDIS_URL nor REDIS_HOST is set — ride locking, driver geo ' +
+        'lookups, rate limiting and the job queues all live in Redis.',
     );
   }
 
