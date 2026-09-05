@@ -119,16 +119,29 @@ describe('environment validation', () => {
       expect(collectEnvProblems(completeProdEnv())).toEqual([]);
     });
 
-    it.each([
-      'INTERNAL_API_KEY',
-      'REDIS_HOST',
-      'SENDGRID_API_KEY',
-      'SENDGRID_FROM_EMAIL',
-    ])('rejects production without %s', (key) => {
+    // Only what genuinely cannot be defaulted blocks a boot: NODE_ENV and
+    // JWT_SECRET are security decisions, Redis carries ride locking and rate
+    // limiting, and there is no app at all without a database.
+    it.each(['REDIS_HOST'])('rejects production without %s', (key) => {
       const env = completeProdEnv();
       delete env[key];
       const problems = collectEnvProblems(env);
       expect(problems.join()).toContain(key);
+    });
+
+    // These gate ONE feature each. Blocking on them meant a deployment with no
+    // SendGrid account could not start, which treated "password reset cannot
+    // deliver its email" as equivalent to "there is no database".
+    it.each([
+      'INTERNAL_API_KEY',
+      'SENDGRID_API_KEY',
+      'SENDGRID_FROM_EMAIL',
+    ])('starts without %s, and warns instead', (key) => {
+      const env = completeProdEnv();
+      delete env[key];
+
+      expect(collectEnvProblems(env)).toEqual([]);
+      expect(collectEnvWarnings(env).join()).toContain(key);
     });
 
     it('accepts discrete database parts instead of a URL', () => {
@@ -148,7 +161,9 @@ describe('environment validation', () => {
     it('reports every problem at once rather than the first', () => {
       // Boot-fix-boot-fix is a miserable loop on a remote host.
       const problems = collectEnvProblems({ NODE_ENV: 'production' });
-      expect(problems.length).toBeGreaterThanOrEqual(6);
+      // JWT_SECRET, REDIS_HOST, and the database. The feature-gating variables
+      // are warnings now, so they are deliberately not counted here.
+      expect(problems.length).toBeGreaterThanOrEqual(3);
     });
 
     it('explains what each missing variable breaks', () => {
@@ -188,8 +203,27 @@ describe('environment validation', () => {
       expect(collectEnvWarnings(env)).toEqual([]);
     });
 
-    it('says nothing in development', () => {
-      expect(collectEnvWarnings({ NODE_ENV: 'development' })).toEqual([]);
+    it('reports only feature-gating gaps in development', () => {
+      const warnings = collectEnvWarnings({ NODE_ENV: 'development' });
+
+      // A bare development environment still has no SendGrid and no internal
+      // key, and saying so is the point — those are the two features that will
+      // silently not work. Nothing else should be reported.
+      expect(warnings.join()).toContain('SENDGRID_API_KEY');
+      expect(warnings.join()).toContain('INTERNAL_API_KEY');
+      expect(warnings.join()).not.toContain('CORS_ORIGINS');
+    });
+
+    it('says nothing once everything is configured', () => {
+      expect(
+        collectEnvWarnings({
+          ...completeProdEnv(),
+          CORS_ORIGINS: 'https://arkrides.com',
+          EMERGENCY_WEBHOOK_URLS: 'https://hooks.example/sos',
+          PRIVY_APP_ID: 'app',
+          PRIVY_VERIFICATION_KEY: 'key',
+        }),
+      ).toEqual([]);
     });
   });
 });

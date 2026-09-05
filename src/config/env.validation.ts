@@ -71,28 +71,30 @@ const RULES: EnvRule[] = [
       'every access token is signed and verified with it; without it the app would fall back to a public string and accept forged admin tokens',
   },
   {
-    key: 'INTERNAL_API_KEY',
-    scope: 'production',
-    because:
-      'the booking-channels ingress (WhatsApp/voice) authenticates with it; unset, that endpoint fails closed and no off-app booking works',
-  },
-  {
     key: 'REDIS_HOST',
     scope: 'production',
     because:
       'ride locking, driver geo lookups, rate limiting and the job queues all live in Redis',
   },
-  {
-    key: 'SENDGRID_API_KEY',
-    scope: 'production',
-    because: 'OTP and password-reset emails are dropped silently without it',
-  },
-  {
-    key: 'SENDGRID_FROM_EMAIL',
-    scope: 'production',
-    because: 'SendGrid rejects every message that has no verified sender',
-  },
 ];
+
+/**
+ * WHY SENDGRID AND INTERNAL_API_KEY ARE WARNINGS, NOT BLOCKERS
+ *
+ * They used to be blocking production rules, which meant a deployment with no
+ * SendGrid account could not start at all. That was the wrong severity: each
+ * of them gates exactly ONE feature, and the other ninety-odd endpoints —
+ * sign-in, booking, the whole ride lifecycle, driver payouts, the admin
+ * queue — work perfectly without them.
+ *
+ * Blocking on a missing SendGrid key treated "password reset cannot deliver
+ * its email" as equivalent to "there is no database", and it stopped a
+ * working product from shipping. What genuinely cannot be defaulted stays a
+ * blocker: NODE_ENV and JWT_SECRET are security decisions, Redis carries ride
+ * locking and rate limiting, and there is no app at all without a database.
+ *
+ * The consequences are stated at boot instead, loudly, every time.
+ */
 
 /**
  * A value counts as missing when it is absent, blank, or a known placeholder.
@@ -172,6 +174,24 @@ export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
  */
 export function collectEnvWarnings(env: NodeJS.ProcessEnv): string[] {
   const warnings: string[] = [];
+
+  // Feature-gating variables: absent means one feature is off, not that the
+  // app is broken. Reported every boot so it is never a silent surprise.
+  if (isMissing(env.SENDGRID_API_KEY) || isMissing(env.SENDGRID_FROM_EMAIL)) {
+    warnings.push(
+      'SENDGRID_API_KEY / SENDGRID_FROM_EMAIL are not both set — no email is ' +
+        'sent, so password-reset and resend-OTP cannot deliver their codes. ' +
+        'Everything else, including sign-up and sign-in, works normally.',
+    );
+  }
+
+  if (isMissing(env.INTERNAL_API_KEY)) {
+    warnings.push(
+      'INTERNAL_API_KEY is not set — the booking-channels ingress ' +
+        '(WhatsApp/voice) fails closed, so off-app booking is unavailable. ' +
+        'In-app booking is unaffected.',
+    );
+  }
   // Not `?? 'development'`. Warnings are advisory, but defaulting here would
   // silence them for exactly the deployment that most needs them — one that
   // inherited no NODE_ENV at all.

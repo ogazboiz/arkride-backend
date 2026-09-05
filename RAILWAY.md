@@ -8,9 +8,20 @@ that tells you what is missing — but it means a deploy with gaps will
 crash-loop with a readable list of problems in the logs rather than coming up
 degraded. Read the variables table before the first deploy.
 
-You need a SendGrid API key. There is no way around it in production: OTP
-delivery for password reset goes through SendGrid, and the app will not start
-without `SENDGRID_API_KEY` and `SENDGRID_FROM_EMAIL`.
+SendGrid is **optional**. Without it the app starts normally and warns at boot;
+password-reset and resend-OTP simply cannot deliver their codes. Everything
+else — sign-up, sign-in, booking, the ride lifecycle, driver payouts, the admin
+queue — works. The same is true of `INTERNAL_API_KEY`, which only gates the
+WhatsApp/voice booking ingress.
+
+What genuinely blocks a boot is short: `NODE_ENV`, `JWT_SECRET`, a database,
+and `REDIS_HOST`. Those cannot be defaulted — the first two are security
+decisions, and Redis carries ride locking and rate limiting.
+
+**Do not paste your local `.env` as-is.** It points `DATABASE_HOST` and
+`REDIS_HOST` at `localhost`, which inside a Railway container means the
+container itself. Reuse `JWT_SECRET` and the Privy values if you like; the
+database and Redis values must come from Railway's service references.
 
 ## 1. Services
 
@@ -60,8 +71,13 @@ KEKE_WEBSITE_URL=https://arkrides.com
 REPORTING_TIMEZONE=Africa/Lagos
 CORS_ORIGINS=<your web app's public URL>
 
-SENDGRID_API_KEY=<required — the app will not boot without it>
-SENDGRID_FROM_EMAIL=<a verified sender on your SendGrid account>
+# Optional. Without these the app runs and warns; only password-reset and
+# resend-OTP stop working.
+SENDGRID_API_KEY=
+SENDGRID_FROM_EMAIL=
+
+# Optional. Only gates the WhatsApp/voice booking ingress.
+INTERNAL_API_KEY=
 ```
 
 The `${{Postgres.*}}` and `${{Redis.*}}` forms are Railway variable references,
