@@ -39,8 +39,11 @@ describe('environment discriminator', () => {
     expect(isDevLike({ NODE_ENV: 'test' })).toBe(true);
   });
 
-  it.each(['production', 'staging'])('treats %p as production-like', (value) => {
-    expect(isProductionLike({ NODE_ENV: value })).toBe(true);
-    expect(isDevLike({ NODE_ENV: value })).toBe(false);
-  });
+  it.each(['production', 'staging'])(
+    'treats %p as production-like',
+    (value) => {
+      expect(isProductionLike({ NODE_ENV: value })).toBe(true);
+      expect(isDevLike({ NODE_ENV: value })).toBe(false);
+    },
+  );
 });

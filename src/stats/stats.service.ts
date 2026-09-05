@@ -258,9 +258,18 @@ export class StatsService {
       this.sumLedger({ type: LedgerEntryType.RIDE_FARE_RIDER_CASHBACK }),
       this.sumLedger({ type: LedgerEntryType.DRIVER_FUEL_SUPPORT_MFB }),
       this.sumLedger({ type: LedgerEntryType.DRIVER_PAYOUT_LINKPAY }),
-      this.sumLedger({ stakeholderType: StakeholderType.PLATFORM }, startOfToday),
-      this.sumLedger({ stakeholderType: StakeholderType.PLATFORM }, sevenDaysAgo),
-      this.sumLedger({ stakeholderType: StakeholderType.PLATFORM }, thirtyDaysAgo),
+      this.sumLedger(
+        { stakeholderType: StakeholderType.PLATFORM },
+        startOfToday,
+      ),
+      this.sumLedger(
+        { stakeholderType: StakeholderType.PLATFORM },
+        sevenDaysAgo,
+      ),
+      this.sumLedger(
+        { stakeholderType: StakeholderType.PLATFORM },
+        thirtyDaysAgo,
+      ),
       this.platformRevenueByDay(30),
       this.inFlightFareValue(),
       this.cancelledFareValue(),
@@ -335,9 +344,7 @@ export class StatsService {
 
   /** `SUM(amount)` over the ledger, optionally from an instant. */
   private async sumLedger(
-    where: Partial<
-      Pick<LedgerEntry, 'type' | 'stakeholderType' | 'status'>
-    >,
+    where: Partial<Pick<LedgerEntry, 'type' | 'stakeholderType' | 'status'>>,
     since?: Date,
   ): Promise<number> {
     const query = this.ledger
@@ -442,11 +449,11 @@ export class StatsService {
     const row = await this.rides
       .createQueryBuilder('ride')
       .select(
-        "COALESCE(AVG(EXTRACT(EPOCH FROM (ride.acceptedAt - ride.requestedAt)) / 60), 0)",
+        'COALESCE(AVG(EXTRACT(EPOCH FROM (ride.acceptedAt - ride.requestedAt)) / 60), 0)',
         'wait',
       )
       .addSelect(
-        "COALESCE(AVG(EXTRACT(EPOCH FROM (ride.completedAt - ride.startedAt)) / 60), 0)",
+        'COALESCE(AVG(EXTRACT(EPOCH FROM (ride.completedAt - ride.startedAt)) / 60), 0)',
         'trip',
       )
       .where('ride.status = :status', { status: RideStatus.COMPLETED })
@@ -546,10 +553,13 @@ export class StatsService {
    * who has withdrawn their money would drop off a leaderboard built on it,
    * which is the opposite of what a leaderboard means.
    */
-  private async topEarningDrivers(
-    limit: number,
-  ): Promise<
-    Array<{ driverId: string; name: string; earnings: number; completedRides: number }>
+  private async topEarningDrivers(limit: number): Promise<
+    Array<{
+      driverId: string;
+      name: string;
+      earnings: number;
+      completedRides: number;
+    }>
   > {
     const rows = await this.ledger
       .createQueryBuilder('entry')
@@ -695,7 +705,11 @@ export function startOfDayIn(now: Date, timeZone: string): Date {
       Number(parts.find((part) => part.type === type)?.value ?? 0);
 
     // Local midnight expressed as though it were UTC. Not yet a real instant.
-    const localMidnightAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'));
+    const localMidnightAsUtc = Date.UTC(
+      get('year'),
+      get('month') - 1,
+      get('day'),
+    );
 
     // First pass using the offset at that nominal instant...
     const firstGuess =

@@ -34,6 +34,8 @@ export function isDevLike(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /** Everything else, INCLUDING an unset NODE_ENV. */
-export function isProductionLike(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isProductionLike(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
   return !isDevLike(env);
 }

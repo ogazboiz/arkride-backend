@@ -153,7 +153,11 @@ export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
   // The database is reachable either by URL or by discrete parts. Requiring
   // both would break the Docker compose setup, which uses the parts; requiring
   // neither is how you get a container that starts and then 500s.
-  if (!isDevLike && isMissing(env.DATABASE_URL) && isMissing(env.DATABASE_HOST)) {
+  if (
+    !isDevLike &&
+    isMissing(env.DATABASE_URL) &&
+    isMissing(env.DATABASE_HOST)
+  ) {
     problems.push(
       'Neither DATABASE_URL nor DATABASE_HOST is set — there is no database to connect to.',
     );
@@ -197,7 +201,9 @@ export function collectEnvWarnings(env: NodeJS.ProcessEnv): string[] {
  * Throws rather than calling `process.exit`, so a test can assert on it and so
  * the stack trace still reaches whatever supervises the process.
  */
-export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): void {
+export function validateEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
   const logger = new Logger('EnvValidation');
   const problems = collectEnvProblems(env);
 

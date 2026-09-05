@@ -70,7 +70,12 @@ describe('ResponseEnvelopeInterceptor — the single success contract', () => {
         totalPages: 3,
       }),
     );
-    expect(result.meta).toEqual({ page: 2, limit: 20, total: 41, totalPages: 3 });
+    expect(result.meta).toEqual({
+      page: 2,
+      limit: 20,
+      total: 41,
+      totalPages: 3,
+    });
   });
 
   it('omits meta entirely when there is none', async () => {
@@ -110,7 +115,9 @@ describe('ResponseEnvelopeInterceptor — the single success contract', () => {
     it('does not mistake a domain object that happens to have success:true', () => {
       // A payout result legitimately carries { success: true, reference }.
       // Treating that as an envelope would drop it from `data`.
-      expect(isAlreadyEnvelope({ success: true, reference: 'ref-1' })).toBe(false);
+      expect(isAlreadyEnvelope({ success: true, reference: 'ref-1' })).toBe(
+        false,
+      );
     });
 
     it.each([null, undefined, 'string', 42, []])('rejects %p', (value) => {

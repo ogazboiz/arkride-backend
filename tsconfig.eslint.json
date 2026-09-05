@@ -1,0 +1,12 @@
+{
+  // tsconfig.json deliberately EXCLUDES `**/*.spec.ts` so that `nest build`
+  // does not emit tests into dist. A side effect was that typescript-eslint's
+  // type-aware rules could not parse a single test file — every spec in the
+  // repository failed with "was not found by the project service", so the
+  // tests were effectively unlinted.
+  //
+  // This config exists only for eslint: same options, wider include.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist", "coverage"]
+}

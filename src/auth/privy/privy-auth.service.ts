@@ -179,7 +179,10 @@ export class PrivyAuthService {
       throw new ForbiddenException('Your account has been blocked.');
     }
 
-    if (identity.wallet && user.walletAddressEvm?.toLowerCase() !== identity.wallet) {
+    if (
+      identity.wallet &&
+      user.walletAddressEvm?.toLowerCase() !== identity.wallet
+    ) {
       user.walletAddressEvm = identity.wallet;
     }
 
@@ -254,7 +257,10 @@ export class PrivyAuthService {
       throw new ForbiddenException('Your driver account has been deactivated.');
     }
 
-    if (identity.wallet && driver.walletAddressEvm?.toLowerCase() !== identity.wallet) {
+    if (
+      identity.wallet &&
+      driver.walletAddressEvm?.toLowerCase() !== identity.wallet
+    ) {
       driver.walletAddressEvm = identity.wallet;
     }
 

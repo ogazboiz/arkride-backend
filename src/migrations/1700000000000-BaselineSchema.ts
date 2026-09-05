@@ -124,15 +124,33 @@ export class BaselineSchema1700000000000 implements MigrationInterface {
     `);
 
     // --- tables -----------------------------------------------------------
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS driver_locations ( id uuid DEFAULT uuid_generate_v4() NOT NULL, latitude numeric(10,8) NOT NULL, longitude numeric(11,8) NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, driver_id uuid )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS drivers ( id uuid DEFAULT uuid_generate_v4() NOT NULL, name character varying NOT NULL, phone character varying NOT NULL, email character varying NOT NULL, password character varying, "licenseNumber" character varying NOT NULL, "licenseExpiry" date NOT NULL, role drivers_role_enum DEFAULT 'driver'::drivers_role_enum NOT NULL, "verificationStatus" drivers_verificationstatus_enum DEFAULT 'pending'::drivers_verificationstatus_enum NOT NULL, "isOnline" boolean DEFAULT false NOT NULL, "isActive" boolean DEFAULT true NOT NULL, "ratingAverage" numeric(3,2) DEFAULT '0'::numeric NOT NULL, "totalCompletedRides" integer DEFAULT 0 NOT NULL, "walletBalance" numeric(10,2) DEFAULT '0'::numeric NOT NULL, "privyDid" character varying, "walletAddressEvm" character varying, "otpCode" character varying, "otpExpiry" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS emergency_incidents ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid NOT NULL, "triggeredBy" emergency_incidents_triggeredby_enum NOT NULL, "triggeredById" uuid NOT NULL, location jsonb, note text, status emergency_incidents_status_enum DEFAULT 'active'::emergency_incidents_status_enum NOT NULL, "resolutionNote" text, "resolvedAt" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS ledger_entries ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid, type ledger_entries_type_enum NOT NULL, "stakeholderType" ledger_entries_stakeholdertype_enum NOT NULL, "stakeholderId" uuid, amount numeric(12,2) NOT NULL, currency character varying(3) DEFAULT 'NGN'::character varying NOT NULL, status ledger_entries_status_enum DEFAULT 'completed'::ledger_entries_status_enum NOT NULL, "providerReference" character varying, metadata jsonb, "createdAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS ratings ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid NOT NULL, "raterId" uuid NOT NULL, "rateeId" uuid NOT NULL, "rateeType" character varying NOT NULL, rating integer NOT NULL, comment text, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS refresh_tokens ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "tokenHash" character varying(64) NOT NULL, "familyId" uuid NOT NULL, "subjectId" uuid NOT NULL, "subjectType" refresh_tokens_subjecttype_enum NOT NULL, "expiresAt" timestamp without time zone NOT NULL, "revokedAt" timestamp without time zone, "revokedReason" character varying, "userAgent" character varying, "ipAddress" character varying, "createdAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS rides ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "userId" uuid NOT NULL, "driverId" uuid, "vehicleId" uuid, pickup jsonb NOT NULL, dropoff jsonb NOT NULL, "distanceKm" numeric(10,2), category rides_category_enum DEFAULT 'private'::rides_category_enum NOT NULL, "estimatedFare" numeric(10,2), "finalFare" numeric(10,2), status rides_status_enum DEFAULT 'requested'::rides_status_enum NOT NULL, "originChannel" rides_originchannel_enum DEFAULT 'app'::rides_originchannel_enum NOT NULL, "cancellationReason" text, "requestedAt" timestamp without time zone DEFAULT now() NOT NULL, "acceptedAt" timestamp without time zone, "startedAt" timestamp without time zone, "completedAt" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS users ( id uuid DEFAULT uuid_generate_v4() NOT NULL, name character varying NOT NULL, email character varying NOT NULL, phone character varying, password character varying, provider character varying, "providerId" character varying, "privyDid" character varying, "walletAddressEvm" character varying, "walletAddressSolana" character varying, "walletAddressTron" character varying, "otpCode" character varying, "otpExpiry" timestamp without time zone, "isVerified" boolean DEFAULT false NOT NULL, role users_role_enum DEFAULT 'user'::users_role_enum NOT NULL, "ratingAverage" numeric(3,2) DEFAULT '0'::numeric NOT NULL, "totalRides" integer DEFAULT 0 NOT NULL, "cashbackBalance" numeric(12,2) DEFAULT '0'::numeric NOT NULL, "isBlocked" boolean DEFAULT false NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
-    await queryRunner.query(`CREATE TABLE IF NOT EXISTS vehicles ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "driverId" uuid NOT NULL, type vehicles_type_enum NOT NULL, "plateNumber" character varying NOT NULL, color character varying NOT NULL, model character varying NOT NULL, year integer NOT NULL, "isActive" boolean DEFAULT true NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS driver_locations ( id uuid DEFAULT uuid_generate_v4() NOT NULL, latitude numeric(10,8) NOT NULL, longitude numeric(11,8) NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, driver_id uuid )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS drivers ( id uuid DEFAULT uuid_generate_v4() NOT NULL, name character varying NOT NULL, phone character varying NOT NULL, email character varying NOT NULL, password character varying, "licenseNumber" character varying NOT NULL, "licenseExpiry" date NOT NULL, role drivers_role_enum DEFAULT 'driver'::drivers_role_enum NOT NULL, "verificationStatus" drivers_verificationstatus_enum DEFAULT 'pending'::drivers_verificationstatus_enum NOT NULL, "isOnline" boolean DEFAULT false NOT NULL, "isActive" boolean DEFAULT true NOT NULL, "ratingAverage" numeric(3,2) DEFAULT '0'::numeric NOT NULL, "totalCompletedRides" integer DEFAULT 0 NOT NULL, "walletBalance" numeric(10,2) DEFAULT '0'::numeric NOT NULL, "privyDid" character varying, "walletAddressEvm" character varying, "otpCode" character varying, "otpExpiry" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS emergency_incidents ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid NOT NULL, "triggeredBy" emergency_incidents_triggeredby_enum NOT NULL, "triggeredById" uuid NOT NULL, location jsonb, note text, status emergency_incidents_status_enum DEFAULT 'active'::emergency_incidents_status_enum NOT NULL, "resolutionNote" text, "resolvedAt" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS ledger_entries ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid, type ledger_entries_type_enum NOT NULL, "stakeholderType" ledger_entries_stakeholdertype_enum NOT NULL, "stakeholderId" uuid, amount numeric(12,2) NOT NULL, currency character varying(3) DEFAULT 'NGN'::character varying NOT NULL, status ledger_entries_status_enum DEFAULT 'completed'::ledger_entries_status_enum NOT NULL, "providerReference" character varying, metadata jsonb, "createdAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS ratings ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "rideId" uuid NOT NULL, "raterId" uuid NOT NULL, "rateeId" uuid NOT NULL, "rateeType" character varying NOT NULL, rating integer NOT NULL, comment text, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS refresh_tokens ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "tokenHash" character varying(64) NOT NULL, "familyId" uuid NOT NULL, "subjectId" uuid NOT NULL, "subjectType" refresh_tokens_subjecttype_enum NOT NULL, "expiresAt" timestamp without time zone NOT NULL, "revokedAt" timestamp without time zone, "revokedReason" character varying, "userAgent" character varying, "ipAddress" character varying, "createdAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS rides ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "userId" uuid NOT NULL, "driverId" uuid, "vehicleId" uuid, pickup jsonb NOT NULL, dropoff jsonb NOT NULL, "distanceKm" numeric(10,2), category rides_category_enum DEFAULT 'private'::rides_category_enum NOT NULL, "estimatedFare" numeric(10,2), "finalFare" numeric(10,2), status rides_status_enum DEFAULT 'requested'::rides_status_enum NOT NULL, "originChannel" rides_originchannel_enum DEFAULT 'app'::rides_originchannel_enum NOT NULL, "cancellationReason" text, "requestedAt" timestamp without time zone DEFAULT now() NOT NULL, "acceptedAt" timestamp without time zone, "startedAt" timestamp without time zone, "completedAt" timestamp without time zone, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS users ( id uuid DEFAULT uuid_generate_v4() NOT NULL, name character varying NOT NULL, email character varying NOT NULL, phone character varying, password character varying, provider character varying, "providerId" character varying, "privyDid" character varying, "walletAddressEvm" character varying, "walletAddressSolana" character varying, "walletAddressTron" character varying, "otpCode" character varying, "otpExpiry" timestamp without time zone, "isVerified" boolean DEFAULT false NOT NULL, role users_role_enum DEFAULT 'user'::users_role_enum NOT NULL, "ratingAverage" numeric(3,2) DEFAULT '0'::numeric NOT NULL, "totalRides" integer DEFAULT 0 NOT NULL, "cashbackBalance" numeric(12,2) DEFAULT '0'::numeric NOT NULL, "isBlocked" boolean DEFAULT false NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE IF NOT EXISTS vehicles ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "driverId" uuid NOT NULL, type vehicles_type_enum NOT NULL, "plateNumber" character varying NOT NULL, color character varying NOT NULL, model character varying NOT NULL, year integer NOT NULL, "isActive" boolean DEFAULT true NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`,
+    );
 
     // --- reconcile columns on tables that already existed -----------------
     //
@@ -345,14 +363,30 @@ export class BaselineSchema1700000000000 implements MigrationInterface {
     `);
 
     // --- indexes ----------------------------------------------------------
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_emergency_ride ON emergency_incidents USING btree ("rideId")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_emergency_status ON emergency_incidents USING btree (status)`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_ledger_stakeholder ON ledger_entries USING btree ("stakeholderType", "stakeholderId")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_rating_ratee ON ratings USING btree ("rateeId", "rateeType")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_refresh_family ON refresh_tokens USING btree ("familyId")`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_refresh_subject ON refresh_tokens USING btree ("subjectId", "subjectType")`);
-    await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_ride_type ON ledger_entries USING btree ("rideId", type) WHERE ("rideId" IS NOT NULL)`);
-    await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_rating_ride_rater ON ratings USING btree ("rideId", "raterId")`);
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_emergency_ride ON emergency_incidents USING btree ("rideId")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_emergency_status ON emergency_incidents USING btree (status)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_ledger_stakeholder ON ledger_entries USING btree ("stakeholderType", "stakeholderId")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_rating_ratee ON ratings USING btree ("rateeId", "rateeType")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_refresh_family ON refresh_tokens USING btree ("familyId")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_refresh_subject ON refresh_tokens USING btree ("subjectId", "subjectType")`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_ride_type ON ledger_entries USING btree ("rideId", type) WHERE ("rideId" IS NOT NULL)`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_rating_ride_rater ON ratings USING btree ("rideId", "raterId")`,
+    );
 
     // --- foreign keys -----------------------------------------------------
     // Last, so every table they reference exists regardless of dump order.
@@ -420,7 +454,9 @@ export class BaselineSchema1700000000000 implements MigrationInterface {
    */
   public async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`DROP TABLE IF EXISTS "ratings" CASCADE`);
-    await queryRunner.query(`DROP TABLE IF EXISTS "emergency_incidents" CASCADE`);
+    await queryRunner.query(
+      `DROP TABLE IF EXISTS "emergency_incidents" CASCADE`,
+    );
     await queryRunner.query(`DROP TABLE IF EXISTS "ledger_entries" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "refresh_tokens" CASCADE`);
     await queryRunner.query(`DROP TABLE IF EXISTS "driver_locations" CASCADE`);
@@ -430,13 +466,23 @@ export class BaselineSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE IF EXISTS "users" CASCADE`);
 
     await queryRunner.query(`DROP TYPE IF EXISTS "drivers_role_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "drivers_verificationstatus_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "emergency_incidents_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "emergency_incidents_triggeredby_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "ledger_entries_stakeholdertype_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "drivers_verificationstatus_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "emergency_incidents_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "emergency_incidents_triggeredby_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "ledger_entries_stakeholdertype_enum"`,
+    );
     await queryRunner.query(`DROP TYPE IF EXISTS "ledger_entries_status_enum"`);
     await queryRunner.query(`DROP TYPE IF EXISTS "ledger_entries_type_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "refresh_tokens_subjecttype_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "refresh_tokens_subjecttype_enum"`,
+    );
     await queryRunner.query(`DROP TYPE IF EXISTS "rides_category_enum"`);
     await queryRunner.query(`DROP TYPE IF EXISTS "rides_originchannel_enum"`);
     await queryRunner.query(`DROP TYPE IF EXISTS "rides_status_enum"`);

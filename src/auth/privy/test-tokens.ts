@@ -1,8 +1,4 @@
-import {
-  generateKeyPairSync,
-  createSign,
-  KeyObject,
-} from 'node:crypto';
+import { generateKeyPairSync, createSign, KeyObject } from 'node:crypto';
 
 /**
  * A minimal ES256 JWT minter for tests.

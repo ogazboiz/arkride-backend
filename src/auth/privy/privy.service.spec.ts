@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import type { KeyObject } from 'node:crypto';
 import { generatePrivyKeyPair, mintPrivyToken } from './test-tokens';
+import { emailFromLinkedAccounts } from './privy.service';
 import { PrivyService, walletFromLinkedAccounts } from './privy.service';
 
 /**
@@ -105,7 +106,9 @@ describe('PrivyService', () => {
 
   describe('verifyAccessToken', () => {
     it('returns the DID for a valid token', async () => {
-      expect(await (await configured()).verifyAccessToken(mintToken())).toBe(DID);
+      expect(await (await configured()).verifyAccessToken(mintToken())).toBe(
+        DID,
+      );
     });
 
     it('refuses everything when Privy is not configured', async () => {
@@ -127,21 +130,25 @@ describe('PrivyService', () => {
 
     it('rejects a token from a different issuer', async () => {
       expect(
-        await (await configured()).verifyAccessToken(mintToken({ iss: 'evil.io' })),
+        await (
+          await configured()
+        ).verifyAccessToken(mintToken({ iss: 'evil.io' })),
       ).toBeNull();
     });
 
     it('rejects an expired token', async () => {
       expect(
-        await (await configured()).verifyAccessToken(mintToken({ expiresInSeconds: -3600 })),
+        await (
+          await configured()
+        ).verifyAccessToken(mintToken({ expiresInSeconds: -3600 })),
       ).toBeNull();
     });
 
     it('rejects a token with no session id', async () => {
       expect(
-        await (await configured()).verifyAccessToken(
-          mintToken({ claims: { sid: undefined } }),
-        ),
+        await (
+          await configured()
+        ).verifyAccessToken(mintToken({ claims: { sid: undefined } })),
       ).toBeNull();
     });
 
@@ -193,7 +200,9 @@ describe('PrivyService', () => {
       const token = mintIdentityToken([
         { type: 'email', address: 'rider@example.com' },
       ]);
-      expect(await (await configured()).walletFromIdentityToken(token)).toBeNull();
+      expect(
+        await (await configured()).walletFromIdentityToken(token),
+      ).toBeNull();
     });
 
     it('prefers the embedded wallet over an externally linked one', async () => {
@@ -216,7 +225,9 @@ describe('PrivyService', () => {
 
     it('returns null rather than throwing on a malformed linked_accounts claim', async () => {
       const token = mintToken({ claims: { linked_accounts: 'not json' } });
-      expect(await (await configured()).walletFromIdentityToken(token)).toBeNull();
+      expect(
+        await (await configured()).walletFromIdentityToken(token),
+      ).toBeNull();
     });
 
     it('returns null for an absent token rather than throwing', async () => {
@@ -232,9 +243,14 @@ describe('PrivyService', () => {
       const attacker = generatePrivyKeyPair();
       const forged = mintToken({
         key: attacker.privateKey,
-        claims: { linked_accounts: JSON.stringify([embedded]), cr: '1700000000' },
+        claims: {
+          linked_accounts: JSON.stringify([embedded]),
+          cr: '1700000000',
+        },
       });
-      expect(await (await configured()).walletFromIdentityToken(forged)).toBeNull();
+      expect(
+        await (await configured()).walletFromIdentityToken(forged),
+      ).toBeNull();
     });
   });
 
@@ -253,7 +269,9 @@ describe('PrivyService', () => {
     };
 
     it('prefers the embedded wallet over a linked one', () => {
-      expect(walletFromLinkedAccounts([external, embedded])).toBe(embedded.address);
+      expect(walletFromLinkedAccounts([external, embedded])).toBe(
+        embedded.address,
+      );
     });
 
     it('falls back to an external wallet when there is no embedded one', () => {
@@ -319,7 +337,6 @@ describe('emailFromLinkedAccounts', () => {
   // This function is the fix for an account takeover: the email used to link a
   // Privy DID to an existing account must come from Privy's SIGNED claims,
   // never from the request body.
-  const { emailFromLinkedAccounts } = require('./privy.service');
 
   it('returns the verified email, lower-cased and trimmed', () => {
     expect(
@@ -350,7 +367,9 @@ describe('emailFromLinkedAccounts', () => {
   });
 
   it('rejects a value with no @, however it is typed', () => {
-    expect(emailFromLinkedAccounts([{ type: 'email', address: 'nope' }])).toBeNull();
+    expect(
+      emailFromLinkedAccounts([{ type: 'email', address: 'nope' }]),
+    ).toBeNull();
   });
 
   it.each([null, undefined, 42, {}, 'not json', '[', []])(

@@ -11,7 +11,12 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Deploys used to build and ship without ever running a test or a typecheck.
+  verify:
+    uses: ./.github/workflows/ci.yml
+
   build-and-deploy:
+    needs: verify
     runs-on: ubuntu-latest
     environment: Digital Ocean Deployment
 

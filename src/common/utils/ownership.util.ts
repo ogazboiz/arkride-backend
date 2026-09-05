@@ -81,5 +81,7 @@ export function assertPartyToRide(
   action: string,
 ): void {
   if (isPartyToRide(principal, ride)) return;
-  throw new ForbiddenException(`You can only ${action} for rides you are part of.`);
+  throw new ForbiddenException(
+    `You can only ${action} for rides you are part of.`,
+  );
 }

@@ -109,16 +109,19 @@ describe('AllExceptionsFilter — the single error contract', () => {
     });
 
     it('preserves a string payload as the message', () => {
-      expect(describeException(new NotFoundException('Ride not found')).message).toBe(
-        'Ride not found',
-      );
+      expect(
+        describeException(new NotFoundException('Ride not found')).message,
+      ).toBe('Ride not found');
     });
   });
 
   describe('database failures are translated, not leaked', () => {
     it('turns a unique violation into a 409 with no driver text', () => {
       const result = describeException(
-        pgError('23505', 'duplicate key value violates unique constraint "users_email_key"'),
+        pgError(
+          '23505',
+          'duplicate key value violates unique constraint "users_email_key"',
+        ),
       );
       expect(result.statusCode).toBe(HttpStatus.CONFLICT);
       expect(result.code).toBe('DUPLICATE_VALUE');

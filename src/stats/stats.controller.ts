@@ -65,7 +65,8 @@ export class StatsController {
   @Roles(Role.ADMIN)
   @ApiBearerAuth('bearer')
   @ApiOperation({
-    summary: 'Financial position, derived from the ledger rather than from rides',
+    summary:
+      'Financial position, derived from the ledger rather than from rides',
   })
   getRevenueStats() {
     return this.statsService.getRevenueStats();
@@ -75,7 +76,9 @@ export class StatsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @ApiBearerAuth('bearer')
-  @ApiOperation({ summary: 'Supply: verification funnel, availability, earnings' })
+  @ApiOperation({
+    summary: 'Supply: verification funnel, availability, earnings',
+  })
   getDriverStats() {
     return this.statsService.getDriverStats();
   }

@@ -1,5 +1,8 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { AuthResolverService } from './auth-resolver.service';
+import {
+  AuthResolverService,
+  stripCredentials,
+} from './auth-resolver.service';
 import { Role } from '../../common/enums/role.enum';
 
 /**
@@ -81,7 +84,6 @@ describe('AuthResolverService', () => {
 });
 
 describe('AuthResolverService — privilege and credential hardening', () => {
-  const { stripCredentials } = require('./auth-resolver.service');
 
   describe('the role comes from the database, not the token', () => {
     let resolver: AuthResolverService;

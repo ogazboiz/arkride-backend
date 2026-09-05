@@ -45,19 +45,23 @@ describe('ownership', () => {
     it('does not confuse a driver id with a rider id of the same value', () => {
       // users and drivers are separate tables with separate id spaces, so a
       // collision is possible in principle; the role must not be ignored.
-      expect(canActOnBehalfOf({ id: 'shared', role: Role.DRIVER }, 'shared')).toBe(true);
+      expect(
+        canActOnBehalfOf({ id: 'shared', role: Role.DRIVER }, 'shared'),
+      ).toBe(true);
     });
   });
 
   describe('assertOwnership', () => {
     it('is silent for the owner', () => {
-      expect(() => assertOwnership(rider, 'rider-1', 'view your own rides')).not.toThrow();
+      expect(() =>
+        assertOwnership(rider, 'rider-1', 'view your own rides'),
+      ).not.toThrow();
     });
 
     it('throws Forbidden for a stranger', () => {
-      expect(() => assertOwnership(rider, 'rider-2', 'view your own rides')).toThrow(
-        ForbiddenException,
-      );
+      expect(() =>
+        assertOwnership(rider, 'rider-2', 'view your own rides'),
+      ).toThrow(ForbiddenException);
     });
 
     it('phrases the refusal without revealing whether the row exists', () => {
@@ -74,8 +78,10 @@ describe('ownership', () => {
   describe('isPartyToRide', () => {
     const ride = { userId: 'rider-1', driverId: 'driver-1' };
 
-    it('accepts the rider', () => expect(isPartyToRide(rider, ride)).toBe(true));
-    it('accepts the driver', () => expect(isPartyToRide(driver, ride)).toBe(true));
+    it('accepts the rider', () =>
+      expect(isPartyToRide(rider, ride)).toBe(true));
+    it('accepts the driver', () =>
+      expect(isPartyToRide(driver, ride)).toBe(true));
     it('accepts an admin', () => expect(isPartyToRide(admin, ride)).toBe(true));
 
     it('refuses an unrelated rider', () => {
@@ -83,7 +89,9 @@ describe('ownership', () => {
     });
 
     it('refuses a driver who is not assigned to it', () => {
-      expect(isPartyToRide({ id: 'driver-9', role: Role.DRIVER }, ride)).toBe(false);
+      expect(isPartyToRide({ id: 'driver-9', role: Role.DRIVER }, ride)).toBe(
+        false,
+      );
     });
 
     it('refuses everyone on an unassigned ride except the rider and admins', () => {
@@ -106,13 +114,21 @@ describe('ownership', () => {
   describe('assertPartyToRide', () => {
     it('throws for a non-party', () => {
       expect(() =>
-        assertPartyToRide(otherRider, { userId: 'rider-1', driverId: 'driver-1' }, 'view SOS incidents'),
+        assertPartyToRide(
+          otherRider,
+          { userId: 'rider-1', driverId: 'driver-1' },
+          'view SOS incidents',
+        ),
       ).toThrow(ForbiddenException);
     });
 
     it('is silent for a party', () => {
       expect(() =>
-        assertPartyToRide(rider, { userId: 'rider-1', driverId: null }, 'view SOS incidents'),
+        assertPartyToRide(
+          rider,
+          { userId: 'rider-1', driverId: null },
+          'view SOS incidents',
+        ),
       ).not.toThrow();
     });
   });

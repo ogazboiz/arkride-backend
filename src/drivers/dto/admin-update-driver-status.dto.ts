@@ -1,4 +1,10 @@
-import { IsBoolean, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VerificationStatus } from '../entities/driver.entity';
 
@@ -12,7 +18,10 @@ import { VerificationStatus } from '../entities/driver.entity';
  * wrote a value the enum does not contain.
  */
 export class UpdateVerificationStatusDto {
-  @ApiProperty({ enum: VerificationStatus, example: VerificationStatus.APPROVED })
+  @ApiProperty({
+    enum: VerificationStatus,
+    example: VerificationStatus.APPROVED,
+  })
   @IsEnum(VerificationStatus, {
     message: `status must be one of: ${Object.values(VerificationStatus).join(', ')}`,
   })

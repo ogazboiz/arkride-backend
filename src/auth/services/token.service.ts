@@ -1,10 +1,6 @@
-import {
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, IsNull, Not } from 'typeorm';
+import { Repository, LessThan, IsNull } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { RefreshToken } from '../entities/refresh-token.entity';
@@ -96,7 +92,8 @@ export class TokenService {
       // logout would end up recorded as a compromise.
       if (stored.revokedReason === 'rotated') {
         this.logger.warn({
-          message: 'Refresh token reuse detected — revoking the whole session family',
+          message:
+            'Refresh token reuse detected — revoking the whole session family',
           familyId: stored.familyId,
           subjectId: stored.subjectId,
         });
@@ -189,7 +186,10 @@ export class TokenService {
   }
 
   /** End every session for one account — used on suspension and on deletion. */
-  async revokeAllForSubject(subjectId: string, subjectType: Role): Promise<void> {
+  async revokeAllForSubject(
+    subjectId: string,
+    subjectType: Role,
+  ): Promise<void> {
     await this.refreshTokens.update(
       { subjectId, subjectType, revokedAt: IsNull() },
       { revokedAt: new Date(), revokedReason: 'subject-revoked' },

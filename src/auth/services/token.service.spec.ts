@@ -27,9 +27,15 @@ class FakeRefreshTokenRepo {
     return Promise.resolve(row);
   }
 
-  findOne({ where }: { where: Partial<RefreshToken> }): Promise<RefreshToken | null> {
+  findOne({
+    where,
+  }: {
+    where: Partial<RefreshToken>;
+  }): Promise<RefreshToken | null> {
     const found = this.rows.find((row) =>
-      Object.entries(where).every(([key, value]) => (row as any)[key] === value),
+      Object.entries(where).every(
+        ([key, value]) => (row as any)[key] === value,
+      ),
     );
     return Promise.resolve(found ?? null);
   }
@@ -59,8 +65,16 @@ class FakeRefreshTokenRepo {
   }
 }
 
-const rider: SessionSubject = { id: 'user-1', role: Role.USER, isDriver: false };
-const driver: SessionSubject = { id: 'driver-1', role: Role.DRIVER, isDriver: true };
+const rider: SessionSubject = {
+  id: 'user-1',
+  role: Role.USER,
+  isDriver: false,
+};
+const driver: SessionSubject = {
+  id: 'driver-1',
+  role: Role.DRIVER,
+  isDriver: true,
+};
 
 describe('TokenService', () => {
   let service: TokenService;
@@ -82,8 +96,15 @@ describe('TokenService', () => {
     service = moduleRef.get(TokenService);
   });
 
-  /** Always resolves the subject, for tests not about revocation. */
-  const alwaysResolve = (subject: SessionSubject) => async () => subject;
+  /**
+   * A resolver stand-in for tests that are not about revocation.
+   *
+   * Returns a resolved promise rather than being an `async` function with no
+   * `await` in it — the real resolver hits the database, this has nothing to
+   * wait for, and the signature the service calls is the same either way.
+   */
+  const alwaysResolve = (subject: SessionSubject) => () =>
+    Promise.resolve(subject);
 
   describe('issueSession', () => {
     it('returns an access token and a refresh token', async () => {
@@ -211,8 +232,14 @@ describe('TokenService', () => {
         // The real client then presents R1 too. Two parties hold one token and
         // there is no way to tell which is which, so both are signed out.
         const first = await service.issueSession(rider);
-        const second = await service.rotate(first.refreshToken, alwaysResolve(rider));
-        const third = await service.rotate(second.refreshToken, alwaysResolve(rider));
+        const second = await service.rotate(
+          first.refreshToken,
+          alwaysResolve(rider),
+        );
+        const third = await service.rotate(
+          second.refreshToken,
+          alwaysResolve(rider),
+        );
 
         // The victim replays an old one.
         await expect(
@@ -229,13 +256,17 @@ describe('TokenService', () => {
 
       it('marks the reason so the incident is visible in the table', async () => {
         const first = await service.issueSession(rider);
-        const second = await service.rotate(first.refreshToken, alwaysResolve(rider));
+        const second = await service.rotate(
+          first.refreshToken,
+          alwaysResolve(rider),
+        );
         await expect(
           service.rotate(first.refreshToken, alwaysResolve(rider)),
         ).rejects.toThrow();
         expect(
-          repo.rows.find((row) => row.tokenHash === hashToken(second.refreshToken))
-            ?.revokedReason,
+          repo.rows.find(
+            (row) => row.tokenHash === hashToken(second.refreshToken),
+          )?.revokedReason,
         ).toBe('reuse-detected');
       });
 
@@ -295,7 +326,7 @@ describe('TokenService', () => {
     describe('subject re-resolution', () => {
       it('asks the resolver about the subject the token points at', async () => {
         const first = await service.issueSession(driver);
-        const resolver = jest.fn(async () => driver);
+        const resolver = jest.fn(() => Promise.resolve(driver));
         await service.rotate(first.refreshToken, resolver);
         expect(resolver).toHaveBeenCalledWith('driver-1', Role.DRIVER);
       });
@@ -305,7 +336,7 @@ describe('TokenService', () => {
         // after the 30-day refresh window.
         const first = await service.issueSession(rider);
         await expect(
-          service.rotate(first.refreshToken, async () => null),
+          service.rotate(first.refreshToken, () => Promise.resolve(null)),
         ).rejects.toThrow(UnauthorizedException);
         // The presented token is consumed either way, and no new one is minted.
         expect(repo.rows[0].revokedAt).toBeInstanceOf(Date);
@@ -314,9 +345,12 @@ describe('TokenService', () => {
 
       it('leaves nothing spendable when the subject is gone', async () => {
         const first = await service.issueSession(rider);
-        const second = await service.rotate(first.refreshToken, alwaysResolve(rider));
+        const second = await service.rotate(
+          first.refreshToken,
+          alwaysResolve(rider),
+        );
         await expect(
-          service.rotate(second.refreshToken, async () => null),
+          service.rotate(second.refreshToken, () => Promise.resolve(null)),
         ).rejects.toThrow(UnauthorizedException);
         expect(repo.rows.every((row) => row.revokedAt)).toBe(true);
       });
@@ -335,7 +369,10 @@ describe('TokenService', () => {
 
     it('ends every rotation of that session, not just the newest', async () => {
       const first = await service.issueSession(rider);
-      const second = await service.rotate(first.refreshToken, alwaysResolve(rider));
+      const second = await service.rotate(
+        first.refreshToken,
+        alwaysResolve(rider),
+      );
       await service.revokeByToken(second.refreshToken);
       expect(repo.rows.every((row) => row.revokedAt)).toBe(true);
     });
@@ -347,7 +384,9 @@ describe('TokenService', () => {
     it('is idempotent', async () => {
       const first = await service.issueSession(rider);
       await service.revokeByToken(first.refreshToken);
-      await expect(service.revokeByToken(first.refreshToken)).resolves.toBeUndefined();
+      await expect(
+        service.revokeByToken(first.refreshToken),
+      ).resolves.toBeUndefined();
       // Crucially it does NOT re-run as reuse detection and change the reason.
       expect(repo.rows[0].revokedReason).toBe('logout');
     });
@@ -375,8 +414,16 @@ describe('TokenService', () => {
 
     it('leaves a driver row alone when revoking the rider with the same id', async () => {
       // Separate id spaces: a shared id must not cross-revoke.
-      await service.issueSession({ id: 'shared', role: Role.USER, isDriver: false });
-      await service.issueSession({ id: 'shared', role: Role.DRIVER, isDriver: true });
+      await service.issueSession({
+        id: 'shared',
+        role: Role.USER,
+        isDriver: false,
+      });
+      await service.issueSession({
+        id: 'shared',
+        role: Role.DRIVER,
+        isDriver: true,
+      });
       await service.revokeAllForSubject('shared', Role.USER);
       expect(repo.rows[0].revokedAt).toBeInstanceOf(Date);
       expect(repo.rows[1].revokedAt).toBeUndefined();

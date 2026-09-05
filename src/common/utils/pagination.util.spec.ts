@@ -27,9 +27,12 @@ describe('pagination clamps', () => {
       },
     );
 
-    it.each(['0', '-1', '-999'])('falls back for the non-positive %p', (value) => {
-      expect(clampLimit(value)).toBe(DEFAULT_PAGE_LIMIT);
-    });
+    it.each(['0', '-1', '-999'])(
+      'falls back for the non-positive %p',
+      (value) => {
+        expect(clampLimit(value)).toBe(DEFAULT_PAGE_LIMIT);
+      },
+    );
 
     it('caps an absurd request instead of honouring it', () => {
       // `?limit=999999999` used to be passed straight through.

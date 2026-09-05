@@ -56,7 +56,10 @@ describe('environment validation', () => {
 
     it('accepts a long, non-placeholder secret', () => {
       expect(
-        collectEnvProblems({ NODE_ENV: 'development', JWT_SECRET: GOOD_SECRET }),
+        collectEnvProblems({
+          NODE_ENV: 'development',
+          JWT_SECRET: GOOD_SECRET,
+        }),
       ).toEqual([]);
     });
   });
@@ -66,7 +69,10 @@ describe('environment validation', () => {
       // A laptop with no SendGrid account must still boot, or people will
       // "fix" it by inventing values that then reach production.
       expect(
-        collectEnvProblems({ NODE_ENV: 'development', JWT_SECRET: GOOD_SECRET }),
+        collectEnvProblems({
+          NODE_ENV: 'development',
+          JWT_SECRET: GOOD_SECRET,
+        }),
       ).toEqual([]);
     });
 

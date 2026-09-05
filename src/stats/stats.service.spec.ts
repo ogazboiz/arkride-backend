@@ -1,4 +1,10 @@
-import { windows, startOfDayIn, money, ratio } from './stats.service';
+import {
+  windows,
+  startOfDayIn,
+  money,
+  ratio,
+  roundDownToMilestone,
+} from './stats.service';
 
 /**
  * The SQL in StatsService is verified end-to-end against a real Postgres by
@@ -17,7 +23,9 @@ describe('stats helpers', () => {
       // correct in testing, because a fresh process is right.
       const first = windows(new Date('2026-03-01T12:00:00Z'));
       const second = windows(new Date('2026-06-01T12:00:00Z'));
-      expect(first.startOfToday.getTime()).not.toBe(second.startOfToday.getTime());
+      expect(first.startOfToday.getTime()).not.toBe(
+        second.startOfToday.getTime(),
+      );
     });
 
     it('puts the seven-day window seven days back', () => {
@@ -50,7 +58,10 @@ describe('stats helpers', () => {
     });
 
     it('is exactly midnight, to the millisecond', () => {
-      const start = startOfDayIn(new Date('2026-03-15T14:37:52.431Z'), 'Africa/Lagos');
+      const start = startOfDayIn(
+        new Date('2026-03-15T14:37:52.431Z'),
+        'Africa/Lagos',
+      );
       expect(start.toISOString()).toBe('2026-03-14T23:00:00.000Z');
     });
 
@@ -71,7 +82,8 @@ describe('stats helpers', () => {
     it('is never more than 24 hours back', () => {
       for (const iso of ['2026-03-15T00:30:00Z', '2026-11-02T05:00:00Z']) {
         const now = new Date(iso);
-        const delta = now.getTime() - startOfDayIn(now, 'Africa/Lagos').getTime();
+        const delta =
+          now.getTime() - startOfDayIn(now, 'Africa/Lagos').getTime();
         expect(delta).toBeLessThan(24 * 3600_000);
         expect(delta).toBeGreaterThanOrEqual(0);
       }
@@ -80,7 +92,10 @@ describe('stats helpers', () => {
     it('handles a zone with a non-hour offset', () => {
       // Kolkata is UTC+5:30 — an offset that a naive hour-based calculation
       // gets wrong by thirty minutes.
-      const start = startOfDayIn(new Date('2026-03-15T12:00:00Z'), 'Asia/Kolkata');
+      const start = startOfDayIn(
+        new Date('2026-03-15T12:00:00Z'),
+        'Asia/Kolkata',
+      );
       expect(start.toISOString()).toBe('2026-03-14T18:30:00.000Z');
     });
 
@@ -166,8 +181,6 @@ describe('stats helpers', () => {
 });
 
 describe('roundDownToMilestone', () => {
-  const { roundDownToMilestone } = require('./stats.service');
-
   it('leaves small numbers alone — rounding 7 to 0 would be its own lie', () => {
     expect(roundDownToMilestone(0)).toBe(0);
     expect(roundDownToMilestone(7)).toBe(7);

@@ -29,6 +29,15 @@ import { ApiFailure, FieldError } from '../dto/api-response';
  *      log against a `requestId`; the client gets that id and nothing else.
  *      Previously an unhandled `Error` had `err.message` echoed to the caller.
  */
+/**
+ * Anything at or above this is our fault, not the caller's, and its detail must
+ * not reach them. A plain number rather than `HttpStatus.INTERNAL_SERVER_ERROR`
+ * because `getStatus()` returns `number`, and comparing a number against a
+ * numeric enum member is the kind of cross-type comparison that reads as a type
+ * error even when it works.
+ */
+const SERVER_ERROR_THRESHOLD = 500;
+
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionFilter');
@@ -65,7 +74,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (errors) body.errors = errors;
 
-    if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+    if (statusCode >= SERVER_ERROR_THRESHOLD) {
       // The one place a request id is minted: the client needs something to
       // quote, and there is nothing to quote on a successful request.
       const requestId = randomUUID();
@@ -103,7 +112,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private handleWsException(exception: unknown, host: ArgumentsHost): void {
     const { statusCode, message, code } = describe(exception);
 
-    const isServerFault = statusCode >= HttpStatus.INTERNAL_SERVER_ERROR;
+    const isServerFault = statusCode >= SERVER_ERROR_THRESHOLD;
     const requestId = isServerFault ? randomUUID() : undefined;
 
     if (isServerFault) {
@@ -136,7 +145,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // not a reason to crash either.
       this.logger.debug({
         message: 'Could not deliver a websocket error to the client',
-        error: emitError instanceof Error ? emitError.message : String(emitError),
+        error:
+          emitError instanceof Error ? emitError.message : String(emitError),
       });
     }
   }
@@ -166,8 +176,7 @@ export function describe(exception: unknown): Described {
 
   return {
     statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-    message:
-      exception instanceof Error ? exception.message : 'Unknown error',
+    message: exception instanceof Error ? exception.message : 'Unknown error',
     code: 'INTERNAL_ERROR',
   };
 }
@@ -209,8 +218,7 @@ function describeHttpException(exception: HttpException): Described {
     return {
       statusCode,
       message: typeof raw === 'string' ? raw : exception.message,
-      code:
-        typeof record.code === 'string' ? record.code : codeFor(statusCode),
+      code: typeof record.code === 'string' ? record.code : codeFor(statusCode),
     };
   }
 
@@ -261,10 +269,10 @@ function describeQueryFailure(exception: QueryFailedError): Described {
  * validation factory throws.
  */
 export function extractArray(payload: unknown): unknown[] | null {
-  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload)) return payload as unknown[];
   if (payload !== null && typeof payload === 'object') {
-    const message = (payload as Record<string, unknown>).message;
-    if (Array.isArray(message)) return message;
+    const message: unknown = (payload as Record<string, unknown>).message;
+    if (Array.isArray(message)) return message as unknown[];
   }
   return null;
 }
@@ -309,9 +317,7 @@ function summarise(errors: FieldError[]): string {
   if (errors.length === 0) return 'The request failed validation.';
   if (errors.length === 1) {
     const only = errors[0];
-    return only.field
-      ? `${only.field}: ${only.messages[0]}`
-      : only.messages[0];
+    return only.field ? `${only.field}: ${only.messages[0]}` : only.messages[0];
   }
   return `${errors.length} fields failed validation.`;
 }

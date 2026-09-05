@@ -35,9 +35,15 @@ pnpm start:dev
 
 Swagger is at `http://localhost:4010/api` in development.
 
-### The one variable you cannot skip
+### The two variables you cannot skip
 
-`JWT_SECRET`, at least 32 characters. The app **refuses to start** without it:
+**`NODE_ENV`** — one of `development | test | staging | production`. Required,
+and value-checked, because it decides whether Swagger is exposed, whether CORS
+falls back to allowing localhost, and whether the production-only checks run.
+Every one of those used to fail *open* when it was unset, and `compose.yml` set
+nothing. `compose.yml` now pins it to `production` unless you override it.
+
+**`JWT_SECRET`**, at least 32 characters. The app **refuses to start** without it:
 
 ```bash
 openssl rand -base64 48
@@ -127,8 +133,9 @@ by Privy being unconfigured.
 
 ### Sessions
 
-Access tokens last **one hour**. Refresh tokens last 30 days, are stored only as
-SHA-256 hashes, and **rotate on every use**.
+Every sign-in path — password, OTP, driver, Privy — returns the same session:
+an access token good for **one hour**, plus a refresh token good for 30 days.
+Refresh tokens are stored only as SHA-256 hashes and **rotate on every use**.
 
 ```http
 POST /api/v1/auth/refresh   { "refreshToken": "..." }
@@ -137,9 +144,16 @@ POST /api/v1/auth/logout    { "refreshToken": "..." }
 
 If an already-consumed refresh token is presented, two parties hold it and there
 is no way to tell which is the thief — so the **entire token family is revoked**
-and both are signed out. The account is re-read from the database on every
-refresh, so a block or a suspension takes effect within the hour rather than at
-the end of the 30-day window.
+and both are signed out. The same applies to two refreshes arriving at once,
+which is indistinguishable from theft; clients must serialise their refreshes.
+The consume is a conditional `UPDATE ... WHERE revokedAt IS NULL`, so the
+database decides the winner rather than a read-then-write in application code.
+
+Suspending, rejecting or deleting a driver revokes their sessions immediately —
+a flag alone would have left them working for up to thirty days. The account is
+also re-read from the database on every refresh, and the caller's **role comes
+from the row, never from the token**, so a demotion takes effect at once rather
+than at the end of the hour.
 
 ---
 
@@ -212,18 +226,28 @@ separately and both left open.
 ## Tests
 
 ```bash
-pnpm test            # 295 unit tests
+pnpm test              # 364 unit tests
 pnpm test:cov
 pnpm lint
 ```
 
-Two things are verified against a **real Postgres 16**, because a mocked
-repository cannot tell you whether the SQL works:
+Three things are verified outside the unit suite, because a mocked repository
+cannot tell you whether the SQL works and a guard unit test cannot tell you
+whether the request ever reaches the guard:
 
 ```bash
-ts-node scripts/dev/verify-stats.ts    # every stats aggregate, seeded + empty
-pnpm migration:run                     # against empty, existing, and re-run
+pnpm verify:stats      # every stats aggregate against a real Postgres, seeded + empty
+pnpm verify:exploits   # 32 real exploits replayed against a RUNNING server
+pnpm migration:run     # verified on empty, synchronize-built, legacy and re-run paths
 ```
+
+`scripts/dev/exploit-suite.mjs` is the important one. Every case in it is a
+request that **used to succeed**: a driver approving their own licence, a rider
+deleting a stranger's vehicle, booking a ride onto someone else's account,
+reading another rider's history or a driver's live GPS and phone number. Unit
+tests assert a guard returns false; this asserts the request comes back 403,
+which is a different claim — and several of these bugs existed precisely
+because the check sat somewhere the request never reached.
 
 Privy verification is tested against the **real `@privy-io/node` verifier** with
 tokens minted from a generated ES256 keypair (`src/auth/privy/test-tokens.ts`) —

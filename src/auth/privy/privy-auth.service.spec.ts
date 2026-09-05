@@ -159,7 +159,13 @@ describe('PrivyAuthService', () => {
 
     it('signs an existing linked rider in without creating a second row', async () => {
       await build([
-        { id: 'user-1', privyDid: DID, name: 'Amina', email: 'a@b.com', isBlocked: false },
+        {
+          id: 'user-1',
+          privyDid: DID,
+          name: 'Amina',
+          email: 'a@b.com',
+          isBlocked: false,
+        },
       ]);
       const result = await riderSignIn();
       expect(result.isNewAccount).toBe(false);
@@ -169,7 +175,13 @@ describe('PrivyAuthService', () => {
 
     it('refuses a blocked rider', async () => {
       await build([
-        { id: 'user-1', privyDid: DID, name: 'A', email: 'a@b.com', isBlocked: true },
+        {
+          id: 'user-1',
+          privyDid: DID,
+          name: 'A',
+          email: 'a@b.com',
+          isBlocked: true,
+        },
       ]);
       await expect(riderSignIn()).rejects.toThrow(ForbiddenException);
       expect(tokens.issueSession).not.toHaveBeenCalled();
@@ -181,7 +193,13 @@ describe('PrivyAuthService', () => {
       // `users.email` is unique, so creating a second row would fail anyway —
       // and this is the same person, who just signed in a different way.
       await build([
-        { id: 'user-1', privyDid: null, name: 'Amina', email: 'a@b.com', isBlocked: false },
+        {
+          id: 'user-1',
+          privyDid: null,
+          name: 'Amina',
+          email: 'a@b.com',
+          isBlocked: false,
+        },
       ]);
       withVerifiedEmail('a@b.com');
       const result = await riderSignIn();
@@ -194,7 +212,13 @@ describe('PrivyAuthService', () => {
     it('refuses to re-point an account already linked to a DIFFERENT DID', async () => {
       // This is the shape an account-takeover attempt has.
       await build([
-        { id: 'user-1', privyDid: OTHER_DID, name: 'A', email: 'a@b.com', isBlocked: false },
+        {
+          id: 'user-1',
+          privyDid: OTHER_DID,
+          name: 'A',
+          email: 'a@b.com',
+          isBlocked: false,
+        },
       ]);
       withVerifiedEmail('a@b.com');
       await expect(riderSignIn()).rejects.toThrow(ForbiddenException);
@@ -207,7 +231,13 @@ describe('PrivyAuthService', () => {
       // The body has no email field any more, and even a stray one must not
       // reach the lookup.
       await build([
-        { id: 'victim', privyDid: null, name: 'Victim', email: 'victim@b.com', isBlocked: false },
+        {
+          id: 'victim',
+          privyDid: null,
+          name: 'Victim',
+          email: 'victim@b.com',
+          isBlocked: false,
+        },
       ]);
       // Privy's verified token says nothing about this address.
       privy.identityFrom.mockResolvedValue({ wallet: null, email: null });
@@ -221,12 +251,20 @@ describe('PrivyAuthService', () => {
 
       expect(result.profile.id).not.toBe('victim');
       expect(result.isNewAccount).toBe(true);
-      expect(users.rows.find((r: any) => r.id === 'victim').privyDid).toBeNull();
+      expect(
+        users.rows.find((r: any) => r.id === 'victim').privyDid,
+      ).toBeNull();
     });
 
     it('links only on the email the VERIFIED token attests to', async () => {
       await build([
-        { id: 'user-1', privyDid: null, name: 'A', email: 'a@b.com', isBlocked: false },
+        {
+          id: 'user-1',
+          privyDid: null,
+          name: 'A',
+          email: 'a@b.com',
+          isBlocked: false,
+        },
       ]);
       withVerifiedEmail('a@b.com');
       await riderSignIn();
@@ -293,16 +331,19 @@ describe('PrivyAuthService', () => {
     });
 
     it('signs in a linked driver', async () => {
-      await build([], [
-        {
-          id: 'driver-1',
-          privyDid: DID,
-          name: 'Yusuf',
-          email: 'y@b.com',
-          isActive: true,
-          verificationStatus: 'approved',
-        },
-      ]);
+      await build(
+        [],
+        [
+          {
+            id: 'driver-1',
+            privyDid: DID,
+            name: 'Yusuf',
+            email: 'y@b.com',
+            isActive: true,
+            verificationStatus: 'approved',
+          },
+        ],
+      );
       const result = await driverSignIn();
       expect(result.profile.role).toBe(Role.DRIVER);
       expect(tokens.issueSession).toHaveBeenCalledWith(
@@ -312,25 +353,37 @@ describe('PrivyAuthService', () => {
     });
 
     it('links an existing driver by email', async () => {
-      await build([], [
-        {
-          id: 'driver-1',
-          privyDid: null,
-          name: 'Y',
-          email: 'y@b.com',
-          isActive: true,
-          verificationStatus: 'pending',
-        },
-      ]);
+      await build(
+        [],
+        [
+          {
+            id: 'driver-1',
+            privyDid: null,
+            name: 'Y',
+            email: 'y@b.com',
+            isActive: true,
+            verificationStatus: 'pending',
+          },
+        ],
+      );
       withVerifiedEmail('y@b.com');
       await driverSignIn();
       expect(drivers.rows[0].privyDid).toBe(DID);
     });
 
     it('refuses a deactivated driver', async () => {
-      await build([], [
-        { id: 'driver-1', privyDid: DID, name: 'Y', email: 'y@b.com', isActive: false },
-      ]);
+      await build(
+        [],
+        [
+          {
+            id: 'driver-1',
+            privyDid: DID,
+            name: 'Y',
+            email: 'y@b.com',
+            isActive: false,
+          },
+        ],
+      );
       await expect(driverSignIn()).rejects.toThrow(ForbiddenException);
     });
   });
@@ -339,9 +392,18 @@ describe('PrivyAuthService', () => {
     it('does not fall back to the drivers table for a rider request', async () => {
       // Guessing which table a DID belongs to breaks exactly for the people
       // who are both a rider and a driver. The client states which it wants.
-      await build([], [
-        { id: 'driver-1', privyDid: DID, name: 'Y', email: 'y@b.com', isActive: true },
-      ]);
+      await build(
+        [],
+        [
+          {
+            id: 'driver-1',
+            privyDid: DID,
+            name: 'Y',
+            email: 'y@b.com',
+            isActive: true,
+          },
+        ],
+      );
       const result = await riderSignIn();
       expect(result.profile.role).toBe(Role.USER);
       expect(result.isNewAccount).toBe(true);
@@ -349,15 +411,37 @@ describe('PrivyAuthService', () => {
 
     it('does not fall back to the users table for a driver request', async () => {
       await build([
-        { id: 'user-1', privyDid: DID, name: 'A', email: 'a@b.com', isBlocked: false },
+        {
+          id: 'user-1',
+          privyDid: DID,
+          name: 'A',
+          email: 'a@b.com',
+          isBlocked: false,
+        },
       ]);
       await expect(driverSignIn()).rejects.toThrow(BadRequestException);
     });
 
     it('lets one DID hold both a rider and a driver session', async () => {
       await build(
-        [{ id: 'user-1', privyDid: DID, name: 'A', email: 'a@b.com', isBlocked: false }],
-        [{ id: 'driver-1', privyDid: DID, name: 'A', email: 'd@b.com', isActive: true }],
+        [
+          {
+            id: 'user-1',
+            privyDid: DID,
+            name: 'A',
+            email: 'a@b.com',
+            isBlocked: false,
+          },
+        ],
+        [
+          {
+            id: 'driver-1',
+            privyDid: DID,
+            name: 'A',
+            email: 'd@b.com',
+            isActive: true,
+          },
+        ],
       );
       expect((await riderSignIn()).profile.id).toBe('user-1');
       expect((await driverSignIn()).profile.id).toBe('driver-1');
