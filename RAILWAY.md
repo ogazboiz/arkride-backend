@@ -174,7 +174,23 @@ curl -X POST https://<your-api-domain>/api/v1/auth/register \
        "acceptTerms":true}'
 ```
 
-then promote that row in the Railway Postgres console:
+then make that account an admin. Two ways:
+
+**Set `ADMIN_EMAILS`** (no database access needed):
+
+```
+ADMIN_EMAILS=you@arkrides.com
+```
+
+Accounts listed there are promoted to admin on boot. It only ever ELEVATES AN
+ACCOUNT THAT ALREADY EXISTS — it never creates a user and never sets a
+password, so the listed address is useless to anyone who cannot already sign in
+as it. Setting it requires deploy access, and anyone with deploy access can
+already reach the database, so it grants nothing new. Safe to leave set; a
+second run is a no-op.
+
+**Or run the UPDATE directly** in Railway's Postgres → Data tab, which needs no
+redeploy:
 
 ```sql
 UPDATE users SET role = 'admin' WHERE email = 'you@arkrides.com';
