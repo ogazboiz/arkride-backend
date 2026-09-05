@@ -1,98 +1,284 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Ark Rides — Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Ride-hailing backend for Ark Rides: keke, okada, car and courier trips across
+Lagos, booked in-app or through WhatsApp and voice.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+NestJS 11 · PostgreSQL (TypeORM) · Redis · BullMQ · Socket.IO · Privy
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## What it does
 
-## Project setup
+| Domain | What lives there |
+|---|---|
+| **Identity** | Rider and driver accounts, OTP verification, password reset, **Privy single sign-on** shared with the rest of WorldStreet, rotating refresh-token sessions |
+| **Rides** | Fare estimation, request, dispatch, the accept → arrived → started → completed lifecycle, cancellation, ratings |
+| **Ledger** | The signed, append-only audit trail every naira moves through. A unique partial index makes paying a fare split twice structurally impossible |
+| **Wallet** | Driver balance, fuel-support advances, payouts. Redis lock + pessimistic row lock + reversal on gateway failure |
+| **Emergency** | In-trip SOS: persisted, broadcast over websockets, and queued to external responders |
+| **Booking channels** | WhatsApp and voice ingress — parse a natural-language message into a ride and book it through the same service the app uses |
+| **Driver locations** | Redis GEO ring for "who is near me" |
+| **Stats** | Operational and financial analytics, derived from the ledger |
+| **Realtime** | Socket.IO gateway pushing ride state to both sides of a trip |
+
+---
+
+## Running it
 
 ```bash
-$ pnpm install
+pnpm install
+cp .env.example .env          # then fill it in — see below
+docker compose -f compose.local.yml up -d   # postgres + redis
+pnpm migration:run            # build the schema
+pnpm start:dev
 ```
 
-## Compile and run the project
+Swagger is at `http://localhost:4010/api` in development.
+
+### The one variable you cannot skip
+
+`JWT_SECRET`, at least 32 characters. The app **refuses to start** without it:
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+openssl rand -base64 48
 ```
 
-## Run tests
+There is no default and there must never be one. Four call sites used to fall
+back to the literal string `'your-secret-key'`, which meant anyone who had read
+this repository could mint an admin token against any deployment that had not
+set the variable.
+
+`.env.example` documents all 27 variables and what breaks without each.
+`src/config/env.validation.ts` decides which are fatal in which environment.
+
+---
+
+## Database
+
+Migrations are the only way the schema changes. `synchronize` is off by default
+in every environment, including development.
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm migration:run            # local, via ts-node
+pnpm migration:show           # what has and has not run
+pnpm migration:revert         # undo the last one
+pnpm migration:run:prod       # in a container, against compiled dist/
 ```
 
-## Deployment
+> **Why two run commands.** The production image runs `pnpm prune --prod`, which
+> removes `ts-node` — so `typeorm-ts-node-commonjs` cannot start there.
+> `migration:run:prod` uses the compiled `dist/data-source.js` and needs no
+> TypeScript at all.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+The baseline migration builds the whole schema from empty. It was generated
+from the entities against a real Postgres rather than written by hand, and is
+verified to produce a byte-identical schema on three paths: an empty database,
+a database that `synchronize` already built, and a re-run.
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:16-alpine
+pnpm schema:sync:dev arkrides_check      # build a reference from the entities
+ts-node scripts/dev/verify-stats.ts      # run every stats query for real
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+---
 
-## Resources
+## Authentication
 
-Check out a few resources that may come in handy when working with NestJS:
+Two ways in. Both end at the same place: an Ark Rides access token.
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Privy (WorldStreet single sign-on)
 
-## Support
+Ark Rides shares one Privy application with Market Square and the rest of
+WorldStreet, so a rider who already has a WorldStreet identity signs in with it.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```http
+POST /api/v1/auth/privy
+Content-Type: application/json
+privy-id-token: <Privy identity token>      # optional; carries the wallet
 
-## Stay in touch
+{ "accessToken": "<Privy access token>", "audience": "rider" }
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Two Privy tokens, two jobs:
 
-## License
+- the **access token** proves *who* the caller is — its `sub` is the Privy DID;
+- the **identity token** carries their embedded wallet, and is **verified**,
+  never trusted. This API is public: a plain header would let anyone claim any
+  address and point a payout at a stranger.
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+`audience` is required and is not a guess. Privy issues one DID, while this
+service has two identity tables with separate id spaces (`users` and `drivers`)
+that every guard, the JWT payload and the websocket handshake are built on — and
+one person may legitimately own an account in each. So the rider app asks for a
+rider session and the driver app asks for a driver session.
+
+Riders are provisioned on first sign-in. **Drivers are not**: driving requires a
+licence, a vehicle and an admin approval, so an unknown DID asking for a driver
+session is told to register.
+
+Wallet addresses are recorded, not yet settled against — earnings still move
+through the naira ledger. The address is what KASH payouts will use.
+
+### Email and password
+
+`POST /api/v1/auth/register` → `verify-otp` → `login`. Unchanged, and unaffected
+by Privy being unconfigured.
+
+### Sessions
+
+Access tokens last **one hour**. Refresh tokens last 30 days, are stored only as
+SHA-256 hashes, and **rotate on every use**.
+
+```http
+POST /api/v1/auth/refresh   { "refreshToken": "..." }
+POST /api/v1/auth/logout    { "refreshToken": "..." }
+```
+
+If an already-consumed refresh token is presented, two parties hold it and there
+is no way to tell which is the thief — so the **entire token family is revoked**
+and both are signed out. The account is re-read from the database on every
+refresh, so a block or a suspension takes effect within the hour rather than at
+the end of the 30-day window.
+
+---
+
+## API shape
+
+Every endpoint returns one of exactly two shapes.
+
+```jsonc
+// 2xx
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Request successful",
+  "data": { },
+  "meta": { "page": 1, "limit": 20, "total": 41, "totalPages": 3 },  // lists only
+  "timestamp": "2026-09-05T09:12:33.000Z"
+}
+
+// 4xx / 5xx
+{
+  "success": false,
+  "statusCode": 400,
+  "message": "email: email must be an email",   // ALWAYS one string
+  "code": "VALIDATION_FAILED",
+  "errors": [ { "field": "email", "messages": ["email must be an email"] } ],
+  "path": "/api/v1/auth/register",
+  "timestamp": "2026-09-05T09:12:33.000Z",
+  "requestId": "…"                              // 5xx only — quote it in a report
+}
+```
+
+A 5xx never carries its internal message. That goes to the log against
+`requestId`; the caller gets the id.
+
+---
+
+## Authorization
+
+- `JwtAuthGuard` authenticates; `RolesGuard` checks `@Roles(...)`.
+- Ownership is **not** left to individual handlers. `assertOwnership` and
+  `assertPartyToRide` in `src/common/utils/ownership.util.ts` are the only
+  implementations, and every route touching a row someone owns calls one.
+- Admin is granted by direct SQL. There is no endpoint that mints an admin.
+- `/api/v1/booking-channels/*` authenticates with `INTERNAL_API_KEY` and a
+  constant-time compare. It fails **closed** when the key is unset.
+
+Rate limiting is Redis-backed, so it holds across replicas. Three named
+throttlers — `short` (burst), `medium` (per minute), `long` (per hour) — and
+every credential endpoint tightens `short` and `medium` on top.
+
+---
+
+## Realtime
+
+```js
+io('https://api.arkrides.com/rides', { auth: { token: '<access token>' } })
+```
+
+The handshake is authenticated and resolved through the same
+`AuthResolverService` HTTP uses, so the two can never disagree about who a token
+belongs to. `join:ride` is authorised against the ride: a driver may join only a
+ride assigned to them, a rider only their own.
+
+Socket CORS and HTTP CORS both read `CORS_ORIGINS`. Socket.IO negotiates its own
+policy and is *not* covered by `app.enableCors()` — they used to be configured
+separately and both left open.
+
+---
+
+## Tests
+
+```bash
+pnpm test            # 295 unit tests
+pnpm test:cov
+pnpm lint
+```
+
+Two things are verified against a **real Postgres 16**, because a mocked
+repository cannot tell you whether the SQL works:
+
+```bash
+ts-node scripts/dev/verify-stats.ts    # every stats aggregate, seeded + empty
+pnpm migration:run                     # against empty, existing, and re-run
+```
+
+Privy verification is tested against the **real `@privy-io/node` verifier** with
+tokens minted from a generated ES256 keypair (`src/auth/privy/test-tokens.ts`) —
+a mock could not demonstrate that a forged token is rejected.
+
+---
+
+## Layout
+
+```
+src/
+├── auth/           identity: local, OTP, Privy, sessions, guards, strategies
+│   ├── privy/      Privy access + identity token verification
+│   └── services/   token issue/rotate/revoke, JWT → principal resolution
+├── rides/          lifecycle, fares, ratings
+├── drivers/        driver accounts, verification, availability
+├── vehicles/
+├── driver-locations/  Redis GEO
+├── ledger/         the money audit trail
+├── wallet/         driver balance, fuel support, payouts
+├── emergency/      SOS
+├── booking-channels/  WhatsApp / voice ingress + NL parsing
+├── stats/          analytics, derived from the ledger
+├── websocket/      Socket.IO gateway (leaf: nothing imports it)
+├── common/         filters, interceptors, guards, ownership, money, OTP
+├── config/         env validation, JWT, CORS
+└── migrations/
+```
+
+`booking-channels` books through `RidesService.createRide()` rather than writing
+rides itself — one booking path, so an invariant added for the app applies to
+WhatsApp automatically.
+
+---
+
+## Known gaps
+
+Stated plainly, because they matter more than the feature list.
+
+- **No payment collection.** `completeRide` credits the driver 95% and the rider
+  1% cashback, but the rider is never charged and there is no
+  `RIDER_FARE_DEBIT` ledger type. The ledger is single-entry today: money is
+  created on completion.
+- **Wallet providers are simulated.** `MFB_PROVIDER` and `LINKPAY_PROVIDER`
+  accept only `simulated`, and the module refuses to boot otherwise. No real
+  disbursement or payout integration exists yet.
+- **Fuel support has no repayment path.** Advances are credited and capped
+  daily; nothing deducts them from future earnings.
+- **Payouts are never settled.** Nothing transitions a `PENDING` payout to
+  `COMPLETED` — there is no provider callback endpoint.
+- **Geocoding is six hardcoded landmarks** (`booking-channels/geocoding`), and
+  the ride parser is a keyword table with two regexes. Both are placeholders
+  and both say so in their own headers.
+- **`driver_locations` is never written.** Live position lives in Redis GEO; the
+  table exists and stays empty, and drivers are never removed from the geo set
+  when they go offline.
+- **No users controller.** There is no way for a rider to read or update their
+  own profile, or to see their cashback balance, outside the login response.

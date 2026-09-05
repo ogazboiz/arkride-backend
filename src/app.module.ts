@@ -20,6 +20,7 @@ import { WebsocketModule } from './websocket/websocket.module';
 import { WalletModule } from './wallet/wallet.module';
 import { EmergencyModule } from './emergency/emergency.module';
 import { BookingChannelsModule } from './booking-channels/booking-channels.module';
+import { StatsModule } from './stats/stats.module';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { BookingChannelsModule } from './booking-channels/booking-channels.modul
     WalletModule,
     EmergencyModule,
     BookingChannelsModule,
+    StatsModule,
 
     // Realtime transport (leaf module — nothing imports it)
     WebsocketModule,
