@@ -6,6 +6,7 @@ import { DriversService } from './drivers.service';
 import { DriversController } from './drivers.controller';
 import { Driver } from './entities/driver.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
+import { jwtModuleOptions } from '../config/jwt.config';
 
 @Module({
   imports: [
@@ -13,10 +14,7 @@ import { Vehicle } from '../vehicles/entities/vehicle.entity';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') || 'your-secret-key',
-        signOptions: { expiresIn: '7d' },
-      }),
+      useFactory: jwtModuleOptions,
     }),
   ],
   controllers: [DriversController],

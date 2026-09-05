@@ -10,6 +10,7 @@ import { CommonModule } from '../common/common.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { DecaneService } from './decane.service';
 import { AuthResolverService } from './services/auth-resolver.service';
+import { jwtModuleOptions } from '../config/jwt.config';
 
 @Module({
   imports: [ 
@@ -20,10 +21,7 @@ import { AuthResolverService } from './services/auth-resolver.service';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET') || 'your-secret-key',
-        signOptions: { expiresIn: '7d' },
-      }),
+      useFactory: jwtModuleOptions,
     }),
   ],
   controllers: [AuthController],

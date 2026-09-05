@@ -194,16 +194,8 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    // Check if email is being updated and if it's already taken by another driver
-    if (updateDriverDto.email && updateDriverDto.email !== driver.email) {
-      const existingDriver = await this.driversRepository.findOne({
-        where: { email: updateDriverDto.email },
-      });
-
-      if (existingDriver) {
-        throw new ConflictException('Email already in use');
-      }
-    }
+    // (An email uniqueness check used to live here. `email` is no longer on
+    // UpdateDriverDto — see the DTO for why — so there is nothing to check.)
 
     // Check if phone is being updated and if it's already taken by another driver
     if (updateDriverDto.phone && updateDriverDto.phone !== driver.phone) {
@@ -235,12 +227,13 @@ export class DriversService {
       }
     }
 
-    // If password is being updated, hash it
-    if (updateDriverDto.password) {
-      updateDriverDto.password = await bcrypt.hash(updateDriverDto.password, 10);
-    }
-
-    // Update the driver
+    // NOTE: `password` and `email` are deliberately not on UpdateDriverDto —
+    // password changes go through forgot-password/reset-password, and an email
+    // change would need re-verification. There is therefore nothing to hash
+    // here, and Object.assign below cannot reach a credential column.
+    //
+    // Object.assign is only safe because the DTO is a written-out allowlist.
+    // If anyone widens that DTO, this line widens with it.
     Object.assign(driver, updateDriverDto);
     const updatedDriver = await this.driversRepository.save(driver);
 
@@ -266,12 +259,28 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    // Only approved drivers can go online
-    // if (isOnline && driver.verificationStatus !== VerificationStatus.APPROVED) {
-    //   throw new BadRequestException(
-    //     'Only approved drivers can go online. Please wait for admin approval.',
-    //   );
-    // }
+    // Only approved drivers may take rides.
+    //
+    // This check was commented out, which made `verificationStatus` decorative:
+    // a driver whose licence had never been reviewed could go online, appear in
+    // /drivers/available and accept passengers. Combined with the (now fixed)
+    // self-approval hole on PATCH /drivers/:id, there was no point at which
+    // anyone had to look at a licence.
+    //
+    // Going OFFLINE is always allowed regardless of status — a suspended driver
+    // must still be able to remove themselves from dispatch.
+    if (isOnline && driver.verificationStatus !== VerificationStatus.APPROVED) {
+      throw new BadRequestException(
+        'Only approved drivers can go online. Your account is currently ' +
+          `${driver.verificationStatus}.`,
+      );
+    }
+
+    if (isOnline && !driver.isActive) {
+      throw new BadRequestException(
+        'This driver account is suspended and cannot go online.',
+      );
+    }
 
     const previousIsOnline = driver.isOnline;
 
@@ -297,12 +306,50 @@ export class DriversService {
 
     driver.verificationStatus = status;
 
-    // If rejected, set driver offline
-    if (status === VerificationStatus.REJECTED) {
+    // Anything other than approved must also take them off dispatch. Rejecting
+    // a driver who was already online used to leave them online and taking
+    // rides until they happened to toggle it themselves.
+    if (status !== VerificationStatus.APPROVED) {
       driver.isOnline = false;
     }
 
     const updatedDriver = await this.driversRepository.save(driver);
+
+    this.logger.log({
+      message: 'Driver verification status changed',
+      driverId: driver.id,
+      status,
+    });
+
+    return this.sanitizeDriver(updatedDriver);
+  }
+
+  /**
+   * Admin suspension / reinstatement.
+   *
+   * Suspending also forces the driver offline in the same write, so a
+   * suspended driver cannot keep serving the rides they already had queued
+   * up in the dispatch list.
+   */
+  async updateActiveStatus(id: string, isActive: boolean, reason?: string) {
+    const driver = await this.driversRepository.findOne({ where: { id } });
+
+    if (!driver) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    driver.isActive = isActive;
+    if (!isActive) {
+      driver.isOnline = false;
+    }
+
+    const updatedDriver = await this.driversRepository.save(driver);
+
+    this.logger.log({
+      message: isActive ? 'Driver reinstated' : 'Driver suspended',
+      driverId: driver.id,
+      reason: reason ?? null,
+    });
 
     return this.sanitizeDriver(updatedDriver);
   }

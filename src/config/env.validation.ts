@@ -1,0 +1,188 @@
+import { Logger } from '@nestjs/common';
+
+/**
+ * Fail-fast environment validation.
+ *
+ * WHY THIS EXISTS
+ *
+ * Four call sites used to read `JWT_SECRET` as
+ * `config.get('JWT_SECRET') || 'your-secret-key'`. With the variable unset the
+ * app booted happily and every token signed with that public string — a string
+ * committed to a repo — was accepted, including one carrying `role: 'admin'`.
+ * A missing secret is not a condition to paper over with a default; it is a
+ * reason to refuse to start.
+ *
+ * The same reasoning applies to the database and Redis: a service that starts
+ * without them only fails later, on a user's request, somewhere less obvious.
+ *
+ * Rules encoded here:
+ *  - REQUIRED_ALWAYS      -> absent means the process exits, in every env.
+ *  - REQUIRED_IN_PROD     -> absent is fatal outside development/test, and a
+ *                            loud warning during local development so that a
+ *                            laptop still runs without a SendGrid key.
+ *  - FORBIDDEN_VALUES     -> present but set to a known placeholder is treated
+ *                            exactly like absent. Shipping the example file's
+ *                            value is the same mistake as shipping no value.
+ */
+
+/** Secrets that must never survive a copy of `.env.example` into `.env`. */
+const PLACEHOLDER_VALUES = new Set([
+  'your-secret-key',
+  'change-me',
+  'changeme',
+  'replace-me',
+  'secret',
+  'password',
+  'todo',
+  '',
+]);
+
+/** Minimum entropy we will accept for a symmetric signing key. */
+const MIN_SECRET_LENGTH = 32;
+
+interface EnvRule {
+  /** Variable name. */
+  key: string;
+  /** Fatal everywhere, or only outside local development. */
+  scope: 'always' | 'production';
+  /** Reject short values — only meaningful for signing keys. */
+  minLength?: number;
+  /** One line explaining what breaks without it, shown in the error. */
+  because: string;
+}
+
+const RULES: EnvRule[] = [
+  {
+    key: 'JWT_SECRET',
+    scope: 'always',
+    minLength: MIN_SECRET_LENGTH,
+    because:
+      'every access token is signed and verified with it; without it the app would fall back to a public string and accept forged admin tokens',
+  },
+  {
+    key: 'INTERNAL_API_KEY',
+    scope: 'production',
+    because:
+      'the booking-channels ingress (WhatsApp/voice) authenticates with it; unset, that endpoint fails closed and no off-app booking works',
+  },
+  {
+    key: 'REDIS_HOST',
+    scope: 'production',
+    because:
+      'ride locking, driver geo lookups, rate limiting and the job queues all live in Redis',
+  },
+  {
+    key: 'SENDGRID_API_KEY',
+    scope: 'production',
+    because: 'OTP and password-reset emails are dropped silently without it',
+  },
+  {
+    key: 'SENDGRID_FROM_EMAIL',
+    scope: 'production',
+    because: 'SendGrid rejects every message that has no verified sender',
+  },
+];
+
+/**
+ * A value counts as missing when it is absent, blank, or a known placeholder.
+ * Case-insensitive: `Change-Me` is the same mistake as `change-me`.
+ */
+function isMissing(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  return PLACEHOLDER_VALUES.has(value.trim().toLowerCase());
+}
+
+/**
+ * Validate `env` and return the problems as human sentences.
+ *
+ * Pure and exported so the unit test can drive it without mutating
+ * `process.env` or bootstrapping Nest.
+ */
+export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
+  const nodeEnv = env.NODE_ENV ?? 'development';
+  const isDevLike = nodeEnv === 'development' || nodeEnv === 'test';
+  const problems: string[] = [];
+
+  for (const rule of RULES) {
+    const enforced = rule.scope === 'always' || !isDevLike;
+    if (!enforced) continue;
+
+    const value = env[rule.key];
+
+    if (isMissing(value)) {
+      problems.push(
+        `${rule.key} is not set (or is still a placeholder) — ${rule.because}.`,
+      );
+      continue;
+    }
+
+    if (rule.minLength && (value as string).length < rule.minLength) {
+      problems.push(
+        `${rule.key} is only ${(value as string).length} characters; at least ${rule.minLength} are required — ${rule.because}.`,
+      );
+    }
+  }
+
+  // The database is reachable either by URL or by discrete parts. Requiring
+  // both would break the Docker compose setup, which uses the parts; requiring
+  // neither is how you get a container that starts and then 500s.
+  if (!isDevLike && isMissing(env.DATABASE_URL) && isMissing(env.DATABASE_HOST)) {
+    problems.push(
+      'Neither DATABASE_URL nor DATABASE_HOST is set — there is no database to connect to.',
+    );
+  }
+
+  return problems;
+}
+
+/**
+ * Warnings are things that are legal but almost certainly unintended.
+ * They never stop the process; they just refuse to be quiet.
+ */
+export function collectEnvWarnings(env: NodeJS.ProcessEnv): string[] {
+  const warnings: string[] = [];
+  const nodeEnv = env.NODE_ENV ?? 'development';
+
+  if (nodeEnv !== 'development' && nodeEnv !== 'test') {
+    if (isMissing(env.CORS_ORIGINS)) {
+      warnings.push(
+        'CORS_ORIGINS is not set, so browser cross-origin requests will be refused. Set it to the comma-separated list of front-end origins.',
+      );
+    }
+    if (isMissing(env.EMERGENCY_WEBHOOK_URLS)) {
+      warnings.push(
+        'EMERGENCY_WEBHOOK_URLS is not set — an SOS will be recorded and broadcast in-app, but no external party is notified.',
+      );
+    }
+    if (isMissing(env.PRIVY_APP_ID) || isMissing(env.PRIVY_VERIFICATION_KEY)) {
+      warnings.push(
+        'PRIVY_APP_ID / PRIVY_VERIFICATION_KEY are not both set — Privy sign-in is disabled and only email/password login will work.',
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Called from `bootstrap()` before the Nest app is created.
+ *
+ * Throws rather than calling `process.exit`, so a test can assert on it and so
+ * the stack trace still reaches whatever supervises the process.
+ */
+export function validateEnvironment(env: NodeJS.ProcessEnv = process.env): void {
+  const logger = new Logger('EnvValidation');
+  const problems = collectEnvProblems(env);
+
+  for (const warning of collectEnvWarnings(env)) {
+    logger.warn(warning);
+  }
+
+  if (problems.length === 0) return;
+
+  const detail = problems.map((p) => `  - ${p}`).join('\n');
+  throw new Error(
+    `Refusing to start: the environment is incomplete.\n${detail}\n` +
+      `See .env.example for the full list of variables.`,
+  );
+}

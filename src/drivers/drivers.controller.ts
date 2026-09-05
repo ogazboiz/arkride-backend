@@ -17,6 +17,10 @@ import { DriversService } from './drivers.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateDriverOnlineStatusDto } from './dto/update-driver-online-status.dto';
+import {
+  UpdateVerificationStatusDto,
+  UpdateDriverActiveStatusDto,
+} from './dto/admin-update-driver-status.dto';
 import { DriverForgotPasswordDto } from './dto/forgot-password.dto';
 import { DriverResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -24,6 +28,9 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
 import { VerificationStatus } from './entities/driver.entity';
+import { assertOwnership, isAdmin } from '../common/utils/ownership.util';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { Principal } from '../common/utils/ownership.util';
 import { DriverLoginDto } from './dto/driver-login.dto';
 import {
   ApiBearerAuth,
@@ -76,20 +83,49 @@ export class DriversController {
     };
   }
 
+  /**
+   * A driver's own record, or any driver's for an admin.
+   *
+   * Was `@Roles(DRIVER, ADMIN)` with no ownership check, so any driver could
+   * read any other driver's email, phone, licence number, licence expiry and
+   * wallet balance by iterating ids.
+   */
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
-  async findOne(@Param('id') id: string) {
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
+    assertOwnership(principal, id, 'view your own driver profile');
     return await this.driversService.findOne(id);
   }
 
+  /**
+   * Update a driver's own profile.
+   *
+   * Two independent holes were closed here. There was no ownership check, so
+   * `@Roles(DRIVER, ADMIN)` meant *any* driver could PATCH *any* driver; and
+   * UpdateDriverDto extended PartialType(CreateDriverDto) while also declaring
+   * verificationStatus/isActive/isOnline, so the writable set included another
+   * account's email and password and the driver's own approval state.
+   *
+   * Ownership is enforced here; the field allowlist is enforced by the DTO.
+   * Both are needed — either alone still leaves an exploit.
+   */
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "Update a driver's own profile" })
+  @ApiParam({ name: 'id', description: 'Driver UUID' })
+  @ApiBody({ type: UpdateDriverDto })
   async update(
     @Param('id') id: string,
     @Body() updateDriverDto: UpdateDriverDto,
+    @CurrentUser() principal: Principal,
   ) {
+    assertOwnership(principal, id, 'update your own driver profile');
     const driver = await this.driversService.update(id, updateDriverDto);
     return {
       message: 'Driver updated successfully',
@@ -148,11 +184,45 @@ export class DriversController {
   @Roles(Role.ADMIN)
   async updateVerificationStatus(
     @Param('id') id: string,
-    @Body('status') status: VerificationStatus,
+    // Was `@Body('status') status: VerificationStatus`. class-validator never
+    // runs on a `@Body('key')` parameter, so any string at all was written
+    // straight into the enum column.
+    @Body() dto: UpdateVerificationStatusDto,
   ) {
-    const driver = await this.driversService.updateVerificationStatus(id, status);
+    const driver = await this.driversService.updateVerificationStatus(
+      id,
+      dto.status,
+    );
     return {
       message: 'Verification status updated successfully',
+      driver,
+    };
+  }
+
+  /**
+   * Suspend or reinstate a driver.
+   *
+   * `isActive` used to be reachable through `PATCH /drivers/:id` by the driver
+   * themselves. It belongs to admins, and only to admins.
+   */
+  @Patch(':id/active-status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Suspend or reinstate a driver (admin)' })
+  @ApiParam({ name: 'id', description: 'Driver UUID' })
+  @ApiBody({ type: UpdateDriverActiveStatusDto })
+  async updateActiveStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateDriverActiveStatusDto,
+  ) {
+    const driver = await this.driversService.updateActiveStatus(
+      id,
+      dto.isActive,
+      dto.reason,
+    );
+    return {
+      message: `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`,
       driver,
     };
   }

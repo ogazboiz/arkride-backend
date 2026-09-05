@@ -32,6 +32,7 @@ import type {
   DriverLocationEvent,
   EmergencyEvent,
 } from '../events/ride-events.constants';
+import { requireJwtSecret } from '../../config/jwt.config';
 
 /**
  * RidesGateway
@@ -93,7 +94,7 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const payload = await this.jwtService.verifyAsync(token, {
         secret:
-          this.configService.get<string>('JWT_SECRET') || 'your-secret-key',
+          requireJwtSecret(this.configService),
       });
 
       const principal = await this.authResolver.resolvePrincipal(payload);
