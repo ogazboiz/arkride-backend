@@ -5,7 +5,6 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "npx typeorm -d dist/data-source.js migration:run && node dist/main",
     "healthcheckPath": "/api/v1/stats/public",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",

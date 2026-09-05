@@ -62,5 +62,12 @@ WORKDIR /app
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 
-CMD ["node", "dist/main"]
+RUN chmod +x ./docker-entrypoint.sh
+
+# Migrations run here, not in a platform start command. A host that ignores
+# railway.json — a service created before it existed, or one with a custom
+# start command — would otherwise boot the API against a database with no
+# tables, which looks healthy and returns DATABASE_ERROR on every request.
+CMD ["./docker-entrypoint.sh"]
