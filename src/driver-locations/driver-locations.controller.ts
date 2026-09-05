@@ -14,6 +14,9 @@ import {
 import { DriverLocationsService } from './driver-locations.service';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
@@ -28,6 +31,8 @@ import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags
  * - GET /api/v1/driver-locations/nearby → Find nearby drivers
  */
 @ApiTags('Driver Locations')
+@ApiBearerAuth('bearer')
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('api/v1/driver-locations')
 export class DriverLocationsController {
   constructor(
@@ -68,8 +73,12 @@ export class DriverLocationsController {
    *   }
    * }
    */
+  // Drivers only. This was `JwtAuthGuard` alone, so a RIDER's token could
+  // publish a GPS ping — and since the driver id is taken from the token, it
+  // wrote a location row keyed by a user id that no driver lookup will ever
+  // match, quietly polluting the geo set.
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @Roles(Role.DRIVER)
   @HttpCode(HttpStatus.OK)
   async updateLocation(
     @Body() updateLocationDto: UpdateLocationDto,
@@ -119,8 +128,7 @@ export class DriverLocationsController {
    * }
    */
   @Get('driver/:driverId')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('bearer')
+  @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   @ApiOperation({ summary: 'Get location for a specific driver' })
   @ApiParam({ name: 'driverId', description: 'Driver UUID' })
   @ApiOkResponse({ description: 'Driver location fetched successfully.' })
@@ -216,8 +224,7 @@ export class DriverLocationsController {
    * Urban areas can use smaller radius (e.g., 5-10km)
    */
   @Get('nearby')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('bearer')
+  @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   @ApiOperation({ summary: 'Find nearby drivers by coordinates and radius' })
   @ApiQuery({ name: 'lat', type: Number, required: true, description: 'Latitude of search point' })
   @ApiQuery({ name: 'lng', type: Number, required: true, description: 'Longitude of search point' })
@@ -226,10 +233,13 @@ export class DriverLocationsController {
   async findNearbyDrivers(
     @Query('lat', ParseFloatPipe) lat: number,
     @Query('lng', ParseFloatPipe) lng: number,
-    @Query('radius') radius?: number,
+    @Query('radius') radius?: string,
   ) {
-    // Parse radius or use default 50km
-    const searchRadius = radius ? Number(radius) : 50;
+    // `radius` was `Number(radius)` with no bound and no validation, so
+    // `?radius=20000` swept the planet and returned the whole fleet in one
+    // call, and `?radius=abc` produced NaN which GEORADIUS rejects with a
+    // driver-level error.
+    const searchRadius = clampRadiusKm(radius);
 
     const drivers = await this.driverLocationsService.findNearbyDrivers(
       lat,
@@ -247,4 +257,21 @@ export class DriverLocationsController {
       drivers,
     };
   }
+}
+
+/** Widest sweep a client may ask for. Dispatch uses the service directly. */
+export const MAX_NEARBY_RADIUS_KM = 50;
+export const DEFAULT_NEARBY_RADIUS_KM = 10;
+
+/**
+ * Turn an untrusted `radius` query value into a usable number of kilometres.
+ *
+ * Exported for the unit test: NaN, negatives, zero and absurd values are the
+ * whole point, and each has a different right answer.
+ */
+export function clampRadiusKm(raw: string | number | undefined): number {
+  if (raw === undefined || raw === '') return DEFAULT_NEARBY_RADIUS_KM;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_NEARBY_RADIUS_KM;
+  return Math.min(parsed, MAX_NEARBY_RADIUS_KM);
 }

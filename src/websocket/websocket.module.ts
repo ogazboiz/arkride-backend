@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
+import { Ride } from '../rides/entities/ride.entity';
 import { RidesGateway } from './gateways/rides.gateway';
 
 /**
@@ -15,7 +16,7 @@ import { RidesGateway } from './gateways/rides.gateway';
  * connecting driver belongs in.
  */
 @Module({
-  imports: [AuthModule, TypeOrmModule.forFeature([Vehicle])],
+  imports: [AuthModule, TypeOrmModule.forFeature([Vehicle, Ride])],
   providers: [RidesGateway],
 })
 export class WebsocketModule {}

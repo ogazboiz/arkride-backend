@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { EmergencyService } from './emergency.service';
@@ -19,6 +20,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { assertPartyToRide } from '../common/utils/ownership.util';
+import type { Principal } from '../common/utils/ownership.util';
 
 /**
  * Emergency Controller
@@ -78,7 +82,19 @@ export class EmergencyController {
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get incidents raised on a ride' })
-  async findByRide(@Param('rideId') rideId: string) {
+  async findByRide(
+    @Param('rideId') rideId: string,
+    @CurrentUser() principal: Principal,
+  ) {
+    // This handler's own docblock said "only for the ride they are actually
+    // in", but nothing checked it. Any authenticated account could read any
+    // SOS incident — which carries the victim's live coordinates.
+    const ride = await this.emergencyService.findRideForAuthorization(rideId);
+    if (!ride) {
+      throw new NotFoundException('Ride not found');
+    }
+    assertPartyToRide(principal, ride, 'view emergency incidents');
+
     const incidents = await this.emergencyService.findByRideId(rideId);
     return { count: incidents.length, incidents };
   }

@@ -17,6 +17,7 @@ import { ApiBadRequestResponse, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiO
 export class AuthController {
   constructor(private readonly authService: AuthService) { }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('register')
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiBody({ type: RegisterDto })
@@ -26,6 +27,7 @@ export class AuthController {
     return this.authService.register(dto)
   }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify account with OTP' })
@@ -36,6 +38,7 @@ export class AuthController {
     return this.authService.verifyOtp(dto);
   }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend account verification OTP' })
@@ -48,11 +51,17 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @Throttle({ short: { limit: 3, ttl: 1000 }})
+  // Credential endpoint: a much tighter burst clamp than the app-wide one.
+  // 5 attempts per minute, and 3 per second, per IP. The `short` and `medium`
+  // names must match SecurityModule's throttlers — an override naming a
+  // throttler that does not exist is silently ignored, which is what the
+  // previous `{ short: ... }` was doing against a config that defined none.
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset OTP' })
@@ -63,6 +72,7 @@ export class AuthController {
     return this.authService.forgotPassword(dto);
   }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password using OTP' })
@@ -73,6 +83,7 @@ export class AuthController {
     return this.authService.resetPassword(dto);
   }
 
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('decane')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Authenticate with Decane Access Token' })

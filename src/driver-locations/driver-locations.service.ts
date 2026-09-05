@@ -109,6 +109,13 @@ export class DriverLocationsService {
    * 
    * Scalability: Redis searches thousands of drivers instantly.
    */
+  /**
+   * Online drivers within `radiusKm` of a point.
+   *
+   * The radius is clamped by the CALLER (see MAX_NEARBY_RADIUS_KM in the
+   * controller) rather than here, so this stays usable for internal dispatch
+   * where a wide sweep is legitimate.
+   */
   async findNearbyDrivers(
     userLat: number,
     userLng: number,
@@ -154,11 +161,24 @@ export class DriverLocationsService {
       return {
         driver: {
           id: dbDriver.id,
-          name: dbDriver.name,
-          phone: dbDriver.phone,
+          // First name only. This is a DISCOVERY response — it answers "is
+          // anyone near me", which every authenticated rider may ask about
+          // any point on the map. It used to return the driver's full name
+          // and PHONE NUMBER, so `?lat=..&lng=..&radius=20000` returned a
+          // contact list for the entire fleet.
+          //
+          // The rider gets the driver's real contact details once the driver
+          // accepts their ride, from the ride record — at which point there
+          // is an actual relationship between the two.
+          name: firstNameOf(dbDriver.name),
           ratingAverage: dbDriver.ratingAverage,
           totalCompletedRides: dbDriver.totalCompletedRides,
-          vehicles: dbDriver.vehicles,
+          vehicles: (dbDriver.vehicles ?? []).map((vehicle) => ({
+            id: vehicle.id,
+            type: vehicle.type,
+            model: vehicle.model,
+            color: vehicle.color,
+          })),
         },
         distance: Number(distance.toFixed(2)),
         location: {
@@ -198,4 +218,16 @@ export class DriverLocationsService {
       longitude: parseFloat(pos[0][0]),
     };
   }
+}
+
+/**
+ * The part of a name safe to show before a ride exists.
+ *
+ * Falls back to the whole string when there is no space, and to 'Driver' when
+ * the name is empty — never to undefined, which would render as a blank card.
+ */
+export function firstNameOf(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return 'Driver';
+  return trimmed.split(/\s+/)[0];
 }

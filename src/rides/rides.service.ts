@@ -115,7 +115,20 @@ export class RidesService {
    * 
    * Speed Fix: Uses Redis Idempotency to prevent double-booking
    */
-  async createRide(createRideDto: CreateRideDto): Promise<Ride> {
+  /**
+   * `userId` is REQUIRED here even though it is optional on the DTO.
+   *
+   * The HTTP controller supplies it from the verified access token and the
+   * booking-channels ingress supplies the guest rider it resolved. Typing it
+   * this way is not cosmetic: an undefined userId would build a SHARED
+   * idempotency key (`...:undefined:lat:lng`) that collides across riders, and
+   * `findOne({ where: { id: undefined } })` returns the FIRST user in the
+   * table rather than none — so the ride would be silently booked onto a
+   * stranger instead of failing.
+   */
+  async createRide(
+    createRideDto: CreateRideDto & { userId: string },
+  ): Promise<Ride> {
     const { userId, pickup, dropoff, category } = createRideDto;
 
     // STEP 1: Prevention of Double-Booking (Idempotency)

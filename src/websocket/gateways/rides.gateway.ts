@@ -33,6 +33,9 @@ import type {
   EmergencyEvent,
 } from '../events/ride-events.constants';
 import { requireJwtSecret } from '../../config/jwt.config';
+import { corsOptions } from '../../config/cors.config';
+import { Ride } from '../../rides/entities/ride.entity';
+import { isPartyToRide } from '../../common/utils/ownership.util';
 
 /**
  * RidesGateway
@@ -58,9 +61,13 @@ import { requireJwtSecret } from '../../config/jwt.config';
 @WebSocketGateway({
   namespace: '/rides',
   // Socket.IO negotiates its own CORS — app.enableCors() in main.ts is
-  // Express-level only and does NOT cover this handshake. If origins are ever
-  // locked down for production, both places must be changed together.
-  cors: { origin: true, credentials: true },
+  // Express-level only and does NOT cover this handshake, which is why this
+  // has to be stated separately.
+  //
+  // It used to be `{ origin: true, credentials: true }`: reflect ANY origin,
+  // with credentials. Both policies now read the same CORS_ORIGINS allowlist,
+  // so they cannot drift apart again.
+  cors: corsOptions(),
 })
 export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RidesGateway.name);
@@ -74,6 +81,9 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly authResolver: AuthResolverService,
     @InjectRepository(Vehicle)
     private readonly vehicleRepository: Repository<Vehicle>,
+    // Needed to answer "is this socket allowed in this ride's room?".
+    @InjectRepository(Ride)
+    private readonly rideRepository: Repository<Ride>,
   ) {}
 
   // ==================== CONNECTION LIFECYCLE ====================
@@ -172,6 +182,12 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
    *
    * Membership is authorised against the ride the socket claims: a driver may
    * only join a ride assigned to them, a rider only their own.
+   *
+   * That paragraph was already written here — but nothing implemented it. The
+   * handler joined whatever room it was handed, so any authenticated socket
+   * could `join:ride` with any UUID and receive that trip's live driver GPS,
+   * the rider's name/email/phone, the fare breakdown, and its SOS alerts.
+   * A comment is not an access control.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.JOIN_RIDE)
   async handleJoinRide(
@@ -181,6 +197,34 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const rideId = body?.rideId;
     if (!rideId) {
       return { status: 'error', message: 'rideId is required' };
+    }
+
+    const principal = client.data?.principal;
+    if (!principal) {
+      // Should be unreachable: handleConnection rejects unauthenticated
+      // sockets. Belt and braces, because the cost of being wrong here is
+      // someone else's live location.
+      return { status: 'error', message: 'Not authenticated' };
+    }
+
+    const ride = await this.rideRepository.findOne({
+      where: { id: rideId },
+      select: { id: true, userId: true, driverId: true },
+    });
+
+    if (!ride) {
+      return { status: 'error', message: 'Ride not found' };
+    }
+
+    if (!isPartyToRide(principal, ride)) {
+      this.logger.warn({
+        message: 'Socket refused entry to a ride room',
+        socketId: client.id,
+        principalId: principal.id,
+        principalRole: principal.role,
+        rideId,
+      });
+      return { status: 'error', message: 'You are not part of this ride' };
     }
 
     await client.join(ROOMS.ride(rideId));

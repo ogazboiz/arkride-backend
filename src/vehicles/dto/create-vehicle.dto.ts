@@ -6,16 +6,33 @@ import {
   Min,
   Max,
   IsUUID,
+  IsOptional,
   Matches,
 } from 'class-validator';
 import { VehicleType } from '../entities/vehicle.entity';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 
 export class CreateVehicleDto {
-  @ApiProperty({ example: '123e4567-e89b-42d3-a456-426614174000' })
-  @IsNotEmpty()
+  /**
+   * Whose vehicle this is.
+   *
+   * SECURITY: this used to be REQUIRED and taken at face value on an endpoint
+   * guarded only by JwtAuthGuard, so any authenticated rider could register a
+   * vehicle against any driver's id.
+   *
+   * It is now optional and ADMIN-ONLY: a driver's own id is taken from their
+   * access token and a driver supplying this field is rejected outright rather
+   * than silently ignored, so a client that thinks it is setting the owner
+   * finds out that it is not.
+   */
+  @ApiPropertyOptional({
+    example: '123e4567-e89b-42d3-a456-426614174000',
+    description:
+      'Admin only. Drivers must omit this — the owner is taken from the access token.',
+  })
+  @IsOptional()
   @IsUUID()
-  driverId: string;
+  driverId?: string;
 
   @ApiProperty({ enum: VehicleType, example: VehicleType.KEKE })
   @IsNotEmpty()
