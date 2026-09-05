@@ -9,6 +9,7 @@ import {
 import { PrivyAuthService } from './privy-auth.service';
 import { PrivyService } from './privy.service';
 import { TokenService } from '../services/token.service';
+import { DriversService } from '../../drivers/drivers.service';
 import { User } from '../../users/entities/user.entity';
 import { Driver } from '../../drivers/entities/driver.entity';
 import { Role } from '../../common/enums/role.enum';
@@ -41,6 +42,7 @@ function fakeRepo<T extends { id: string }>(seed: T[] = []) {
 
 describe('PrivyAuthService', () => {
   let service: PrivyAuthService;
+  let driversService: { createFromPrivy: jest.Mock };
   let users: ReturnType<typeof fakeRepo<any>>;
   let drivers: ReturnType<typeof fakeRepo<any>>;
   let privy: {
@@ -72,6 +74,13 @@ describe('PrivyAuthService', () => {
       }),
     };
 
+    // PrivyAuthService gained a DriversService dependency when driver
+    // provisioning was added; without it Nest cannot construct the service and
+    // every test in this file fails to build its module.
+    driversService = {
+      createFromPrivy: jest.fn(),
+    };
+
     const moduleRef = await Test.createTestingModule({
       providers: [
         PrivyAuthService,
@@ -79,6 +88,7 @@ describe('PrivyAuthService', () => {
         { provide: TokenService, useValue: tokens },
         { provide: getRepositoryToken(User), useValue: users },
         { provide: getRepositoryToken(Driver), useValue: drivers },
+        { provide: DriversService, useValue: driversService },
       ],
     }).compile();
 
