@@ -8,19 +8,32 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import { RidesService } from './rides.service';
 import { CreateRideDto } from './dto/create-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { UpdateRideStatusDto } from './dto/update-ride-status.dto';
-import { EstimateRideDto, RideOptionDto, EstimateResponseDto } from './dto/estimate-ride.dto';
+import { EstimateRideDto, RideOptionDto } from './dto/estimate-ride.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../common/enums/role.enum';
-import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import {
+  assertOwnership,
+  assertPartyToRide,
+} from '../common/utils/ownership.util';
+import type { Principal } from '../common/utils/ownership.util';
+import { enveloped, listMeta } from '../common/dto/api-response';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 /**
  * Rides Controller
@@ -40,21 +53,30 @@ export class RidesController {
    * @body EstimateRideDto - Pickup and dropoff locations
    * @returns Array of ride options with fares
    */
+  /**
+   * NOTE ON AUTH: this handler used to carry `@Public()` *and*
+   * `@UseGuards(JwtAuthGuard, RolesGuard)` *and* `@Roles(Role.USER)`.
+   * `@Public()` short-circuits both guards, so the @Roles was dead and the
+   * endpoint was anonymous — while reading as though it were not.
+   *
+   * Resolved in favour of authentication. Estimating calls geocoding and the
+   * fare engine, so leaving it open is both a free compute endpoint and a way
+   * to probe the pricing model without an account.
+   */
   @Post('estimate')
-  @Public()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER)
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get ride price estimates' })
   @ApiBody({ type: EstimateRideDto })
-  @ApiOkResponse({ description: 'Estimates calculated successfully.', type: EstimateResponseDto })
+  @ApiOkResponse({
+    description: 'Fare estimates for every category.',
+    type: [RideOptionDto],
+  })
   async estimateRide(@Body() estimateDto: EstimateRideDto) {
     const estimates = await this.ridesService.estimateRide(estimateDto);
-    return {
-      message: 'Estimates calculated successfully',
-      estimates,
-    };
+    return enveloped(estimates, 'Estimates calculated successfully');
   }
 
   /**
@@ -70,13 +92,33 @@ export class RidesController {
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Request a new ride' })
   @ApiBody({ type: CreateRideDto })
-  @ApiOkResponse({ description: 'Ride requested successfully.' })
-  async createRide(@Body() createRideDto: CreateRideDto) {
-    const ride = await this.ridesService.createRide(createRideDto);
-    return {
-      message: 'Ride requested successfully',
-      ride,
-    };
+  @ApiCreatedResponse({ description: 'Ride requested successfully.' })
+  async createRide(
+    @Body() createRideDto: CreateRideDto,
+    @CurrentUser() principal: Principal,
+  ) {
+    // SECURITY: `userId` used to be a required field on CreateRideDto and was
+    // used verbatim. Any authenticated rider could book a ride onto another
+    // rider's account — and, since completeRide credits cashback and debits
+    // against the rider, onto their money.
+    //
+    // The rider is now whoever the access token says it is. A body that tries
+    // to name someone else is rejected rather than ignored, so a client cannot
+    // believe it succeeded in setting it.
+    if (
+      createRideDto.userId !== undefined &&
+      createRideDto.userId !== principal.id
+    ) {
+      throw new ForbiddenException(
+        'You cannot request a ride for another user.',
+      );
+    }
+
+    const ride = await this.ridesService.createRide({
+      ...createRideDto,
+      userId: principal.id,
+    });
+    return enveloped(ride, 'Ride requested successfully');
   }
 
   /**
@@ -86,14 +128,20 @@ export class RidesController {
    * @returns Array of user's rides
    */
   @Get('user/:userId')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "List a rider's own ride history" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN)
-  async getUserRides(@Param('userId') userId: string) {
+  async getUserRides(
+    @Param('userId') userId: string,
+    @CurrentUser() principal: Principal,
+  ) {
+    // Was `@Roles(USER, ADMIN)` with no ownership check, so any rider could
+    // read any other rider's full history — pickup and dropoff addresses
+    // (i.e. home and work), fares, and the driver on each trip.
+    assertOwnership(principal, userId, 'view your own ride history');
     const rides = await this.ridesService.findByUserId(userId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -105,21 +153,20 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/cancel/user')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Cancel a ride as the rider' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER)
   async cancelRideByUser(
     @Param('id') id: string,
     @Body() cancelDto: CancelRideDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get user ID from JWT token payload
-    const userId = req.user.id;
-    
+    const userId = principal.id;
+
     const ride = await this.ridesService.cancelRide(id, cancelDto, userId);
-    return {
-      message: 'Ride cancelled successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride cancelled successfully');
   }
 
   // ==================== DRIVER ENDPOINTS ====================
@@ -130,17 +177,19 @@ export class RidesController {
    * @returns Array of rides with status 'requested'
    */
   @Get('available')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary:
+      "List rides waiting for a driver, matched to the caller's vehicles",
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async getAvailableRides(@Request() req: any) {
+  async getAvailableRides(@CurrentUser() principal: Principal) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const rides = await this.ridesService.findAvailableRides(driverId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -150,14 +199,17 @@ export class RidesController {
    * @returns Array of driver's rides
    */
   @Get('driver/:driverId')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "List a driver's own ride history" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
-  async getDriverRides(@Param('driverId') driverId: string) {
+  async getDriverRides(
+    @Param('driverId') driverId: string,
+    @CurrentUser() principal: Principal,
+  ) {
+    assertOwnership(principal, driverId, 'view your own ride history');
     const rides = await this.ridesService.findByDriverId(driverId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -168,21 +220,20 @@ export class RidesController {
    * @returns Updated ride with driver and vehicle info
    */
   @Patch(':id/accept')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Accept a requested ride' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async acceptRide(
     @Param('id') id: string,
     @Body() updateDto: UpdateRideStatusDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.acceptRide(id, driverId, updateDto);
-    return {
-      message: 'Ride accepted successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride accepted successfully');
   }
 
   /**
@@ -192,17 +243,19 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/arrived')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Mark arrival at the pickup point' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async markArrived(@Param('id') id: string, @Request() req: any) {
+  async markArrived(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.markArrived(id, driverId);
-    return {
-      message: 'Marked as arrived at pickup location',
-      ride,
-    };
+    return enveloped(ride, 'Marked as arrived at pickup location');
   }
 
   /**
@@ -212,17 +265,19 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/start')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Start the trip' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async startRide(@Param('id') id: string, @Request() req: any) {
+  async startRide(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.startRide(id, driverId);
-    return {
-      message: 'Ride started successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride started successfully');
   }
 
   /**
@@ -232,17 +287,19 @@ export class RidesController {
    * @returns Updated ride with final fare
    */
   @Patch(':id/complete')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Complete the trip and settle the fare' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async completeRide(@Param('id') id: string, @Request() req: any) {
+  async completeRide(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.completeRide(id, driverId);
-    return {
-      message: 'Ride completed successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride completed successfully');
   }
 
   /**
@@ -254,26 +311,25 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/cancel/driver')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Cancel an accepted ride as the driver' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async cancelRideByDriver(
     @Param('id') id: string,
     @Body() cancelDto: CancelRideDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.cancelRide(
       id,
       cancelDto,
       undefined,
       driverId,
     );
-    return {
-      message: 'Ride cancelled successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride cancelled successfully');
   }
 
   // ==================== COMMON ENDPOINTS ====================
@@ -284,14 +340,13 @@ export class RidesController {
    * @returns Array of all rides
    */
   @Get()
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'List every ride (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async getAllRides() {
     const rides = await this.ridesService.findAll();
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -305,11 +360,14 @@ export class RidesController {
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get the revenue split for a ride' })
-  async getFareBreakdown(@Param('id') id: string, @Request() req: any) {
+  async getFareBreakdown(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     return await this.ridesService.getFareBreakdown(
       id,
-      req.user.id,
-      req.user.role === Role.ADMIN,
+      principal.id,
+      principal.role === Role.ADMIN,
     );
   }
 
@@ -320,9 +378,17 @@ export class RidesController {
    * @returns Ride details with user, driver, and vehicle info
    */
   @Get(':id')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get one ride (must be a party to it)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
-  async getRide(@Param('id') id: string) {
-    return await this.ridesService.findOne(id);
+  async getRide(@Param('id') id: string, @CurrentUser() principal: Principal) {
+    const ride = await this.ridesService.findOne(id);
+    // findOne eagerly loads ['user', 'driver', 'driver.location', 'vehicle'],
+    // so an unchecked read handed any authenticated caller the rider's name,
+    // email and phone plus the driver's record. `getFareBreakdown` on this
+    // same controller already checked party membership; this did not.
+    assertPartyToRide(principal, ride, 'view details');
+    return ride;
   }
 }

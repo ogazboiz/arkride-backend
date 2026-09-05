@@ -4,6 +4,7 @@ import { DriverLocationsService } from './driver-locations.service';
 import { DriverLocationsController } from './driver-locations.controller';
 import { DriverLocation } from './entities/driver-location.entity';
 import { Driver } from '../drivers/entities/driver.entity';
+import { Ride } from '../rides/entities/ride.entity';
 
 /**
  * DriverLocationsModule
@@ -36,7 +37,7 @@ import { Driver } from '../drivers/entities/driver.entity';
      * DriverLocation entity is kept for schema generation but the service
      * now primarily uses Redis for real-time tracking.
      */
-    TypeOrmModule.forFeature([DriverLocation, Driver]),
+    TypeOrmModule.forFeature([DriverLocation, Driver, Ride]),
   ],
 
   /**

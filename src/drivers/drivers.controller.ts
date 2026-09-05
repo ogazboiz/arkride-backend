@@ -9,31 +9,38 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Req,
-  ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { DriversService } from './drivers.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { UpdateDriverDto } from './dto/update-driver.dto';
 import { UpdateDriverOnlineStatusDto } from './dto/update-driver-online-status.dto';
+import {
+  UpdateVerificationStatusDto,
+  UpdateDriverActiveStatusDto,
+} from './dto/admin-update-driver-status.dto';
 import { DriverForgotPasswordDto } from './dto/forgot-password.dto';
 import { DriverResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
-import { VerificationStatus } from './entities/driver.entity';
+import { assertOwnership } from '../common/utils/ownership.util';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { Principal } from '../common/utils/ownership.util';
 import { DriverLoginDto } from './dto/driver-login.dto';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { enveloped, listMeta } from '../common/dto/api-response';
 
 @ApiTags('Drivers')
 @Controller('api/v1/drivers')
@@ -42,20 +49,30 @@ export class DriversController {
 
   constructor(private readonly driversService: DriversService) {}
 
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new driver' })
   @ApiBody({ type: CreateDriverDto })
-  @ApiOkResponse({ description: 'Driver registration successful.' })
+  @ApiCreatedResponse({ description: 'Driver registration successful.' })
   async create(@Body() createDriverDto: CreateDriverDto) {
     const result = await this.driversService.create(createDriverDto);
-    return {
-      message: 'Driver registration successful. You can now start using the app.',
-      driver: result.driver,
-      token: result.token,
-    };
+    // Spread the whole result. Cherry-picking `token` here silently dropped
+    // `refreshToken` / `expiresIn`, so a driver who had just registered had a
+    // one-hour session and no way to renew it.
+    return enveloped(
+      result,
+      'Driver registration successful. You can now start using the app.',
+    );
   }
 
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Driver login' })
@@ -66,65 +83,86 @@ export class DriversController {
   }
 
   @Get()
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'List all drivers (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async findAll() {
     const drivers = await this.driversService.findAll();
-    return {
-      count: drivers.length,
-      drivers,
-    };
+    return enveloped(drivers, undefined, listMeta(drivers));
   }
 
+  /**
+   * A driver's own record, or any driver's for an admin.
+   *
+   * Was `@Roles(DRIVER, ADMIN)` with no ownership check, so any driver could
+   * read any other driver's email, phone, licence number, licence expiry and
+   * wallet balance by iterating ids.
+   */
   @Get(':id')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get a driver profile (own, or any for an admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
-  async findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string, @CurrentUser() principal: Principal) {
+    assertOwnership(principal, id, 'view your own driver profile');
     return await this.driversService.findOne(id);
   }
 
+  /**
+   * Update a driver's own profile.
+   *
+   * Two independent holes were closed here. There was no ownership check, so
+   * `@Roles(DRIVER, ADMIN)` meant *any* driver could PATCH *any* driver; and
+   * UpdateDriverDto extended PartialType(CreateDriverDto) while also declaring
+   * verificationStatus/isActive/isOnline, so the writable set included another
+   * account's email and password and the driver's own approval state.
+   *
+   * Ownership is enforced here; the field allowlist is enforced by the DTO.
+   * Both are needed — either alone still leaves an exploit.
+   */
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "Update a driver's own profile" })
+  @ApiParam({ name: 'id', description: 'Driver UUID' })
+  @ApiBody({ type: UpdateDriverDto })
   async update(
     @Param('id') id: string,
     @Body() updateDriverDto: UpdateDriverDto,
+    @CurrentUser() principal: Principal,
   ) {
+    assertOwnership(principal, id, 'update your own driver profile');
     const driver = await this.driversService.update(id, updateDriverDto);
-    return {
-      message: 'Driver updated successfully',
-      driver,
-    };
+    return enveloped(driver, 'Driver updated successfully');
   }
 
   @Patch(':id/online-status')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Go online or offline (own account only)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async updateOnlineStatus(
     @Param('id') id: string,
     @Body() updateOnlineStatusDto: UpdateDriverOnlineStatusDto,
-    @Req() req,
+    @CurrentUser() principal: Principal,
   ) {
     this.logger.log({
       message: 'Driver online status update requested',
       driverIdParam: id,
-      authenticatedUserId: req.user?.id,
-      authenticatedUserRole: req.user?.role,
+      authenticatedUserId: principal?.id,
+      authenticatedUserRole: principal?.role,
       bodyKeys: Object.keys(updateOnlineStatusDto ?? {}),
       isOnline: updateOnlineStatusDto?.isOnline,
       isOnlineType: typeof updateOnlineStatusDto?.isOnline,
     });
 
-    if (req.user.id !== id) {
-      this.logger.warn({
-        message: 'Driver online status update denied: user can only update own status',
-        driverIdParam: id,
-        authenticatedUserId: req.user?.id,
-        authenticatedUserRole: req.user?.role,
-      });
-
-      throw new ForbiddenException('You can only update your own online status');
-    }
+    // Was a hand-rolled `req.user.id !== id`, which had no admin escape and so
+    // silently contradicted ownership.util's stated rule that an admin may act
+    // on anything. The whole point of that file is that these stop being
+    // written per handler.
+    assertOwnership(principal, id, 'update your own online status');
 
     const driver = await this.driversService.updateOnlineStatus(
       id,
@@ -137,33 +175,76 @@ export class DriversController {
       isOnline: driver.isOnline,
     });
 
-    return {
-      message: `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`,
+    return enveloped(
       driver,
-    };
+      `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`,
+    );
   }
 
   @Patch(':id/verification-status')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "Approve or reject a driver's licence (admin)" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async updateVerificationStatus(
     @Param('id') id: string,
-    @Body('status') status: VerificationStatus,
+    // Was `@Body('status') status: VerificationStatus`. class-validator never
+    // runs on a `@Body('key')` parameter, so any string at all was written
+    // straight into the enum column.
+    @Body() dto: UpdateVerificationStatusDto,
   ) {
-    const driver = await this.driversService.updateVerificationStatus(id, status);
-    return {
-      message: 'Verification status updated successfully',
-      driver,
-    };
+    const driver = await this.driversService.updateVerificationStatus(
+      id,
+      dto.status,
+    );
+    return enveloped(driver, 'Verification status updated successfully');
   }
 
+  /**
+   * Suspend or reinstate a driver.
+   *
+   * `isActive` used to be reachable through `PATCH /drivers/:id` by the driver
+   * themselves. It belongs to admins, and only to admins.
+   */
+  @Patch(':id/active-status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Suspend or reinstate a driver (admin)' })
+  @ApiParam({ name: 'id', description: 'Driver UUID' })
+  @ApiBody({ type: UpdateDriverActiveStatusDto })
+  async updateActiveStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateDriverActiveStatusDto,
+  ) {
+    const driver = await this.driversService.updateActiveStatus(
+      id,
+      dto.isActive,
+      dto.reason,
+    );
+    return enveloped(
+      driver,
+      `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`,
+    );
+  }
+
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('forgot-password')
+  @ApiOperation({ summary: 'Send a password-reset OTP to a driver' })
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: DriverForgotPasswordDto) {
     return await this.driversService.forgotPassword(dto);
   }
 
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('reset-password')
+  @ApiOperation({ summary: 'Reset a driver password using an OTP' })
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: DriverResetPasswordDto) {
     return await this.driversService.resetPassword(dto);
@@ -177,10 +258,10 @@ export class DriversController {
   @ApiOperation({ summary: 'Delete a driver' })
   @ApiParam({ name: 'id', description: 'Driver UUID' })
   @ApiNoContentResponse({ description: 'Driver deleted successfully.' })
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string): Promise<void> {
     await this.driversService.remove(id);
-    return {
-        message: "Driver deleted successfully"
-    }
+    // 204 carries no body. The object that used to be returned here was
+    // discarded by Express and the caller silently received nothing — the same
+    // bug already fixed on the vehicles controller.
   }
 }

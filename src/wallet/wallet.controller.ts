@@ -4,7 +4,6 @@ import {
   Post,
   Body,
   Query,
-  Request,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -16,12 +15,15 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { clampLimit, clampOffset } from '../common/utils/pagination.util';
 import { WalletService } from './wallet.service';
 import { RequestFuelSupportDto, RequestPayoutDto } from './dto/wallet.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { Principal } from '../common/utils/ownership.util';
 
 /**
  * Wallet Controller
@@ -34,6 +36,7 @@ import { Role } from '../common/enums/role.enum';
  */
 @ApiTags('Wallet')
 @Controller('api/v1/wallet')
+@ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.DRIVER)
 @ApiBearerAuth('bearer')
@@ -46,8 +49,8 @@ export class WalletController {
   @Get('balance')
   @ApiOperation({ summary: 'Get my wallet balance and fuel allowance' })
   @ApiOkResponse({ description: 'Current wallet position.' })
-  async getBalance(@Request() req: any) {
-    return await this.walletService.getBalance(req.user.id);
+  async getBalance(@CurrentUser() principal: Principal) {
+    return await this.walletService.getBalance(principal.id);
   }
 
   /**
@@ -55,8 +58,8 @@ export class WalletController {
    */
   @Get('fuel-support/limit')
   @ApiOperation({ summary: "Get today's remaining MFB fuel support allowance" })
-  async getFuelSupportLimit(@Request() req: any) {
-    return await this.walletService.getFuelSupportLimit(req.user.id);
+  async getFuelSupportLimit(@CurrentUser() principal: Principal) {
+    return await this.walletService.getFuelSupportLimit(principal.id);
   }
 
   /**
@@ -69,10 +72,10 @@ export class WalletController {
   })
   @ApiBody({ type: RequestFuelSupportDto })
   async requestFuelSupport(
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
     @Body() dto: RequestFuelSupportDto,
   ) {
-    return await this.walletService.requestFuelSupport(req.user.id, dto);
+    return await this.walletService.requestFuelSupport(principal.id, dto);
   }
 
   /**
@@ -82,8 +85,11 @@ export class WalletController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Withdraw earnings through LinkPay' })
   @ApiBody({ type: RequestPayoutDto })
-  async requestPayout(@Request() req: any, @Body() dto: RequestPayoutDto) {
-    return await this.walletService.requestPayout(req.user.id, dto);
+  async requestPayout(
+    @CurrentUser() principal: Principal,
+    @Body() dto: RequestPayoutDto,
+  ) {
+    return await this.walletService.requestPayout(principal.id, dto);
   }
 
   /**
@@ -92,14 +98,14 @@ export class WalletController {
   @Get('transactions')
   @ApiOperation({ summary: 'My wallet transaction history' })
   async getTransactions(
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
     @Query('limit') limit = '50',
     @Query('offset') offset = '0',
   ) {
     return await this.walletService.getTransactions(
-      req.user.id,
-      Number(limit),
-      Number(offset),
+      principal.id,
+      clampLimit(limit),
+      clampOffset(offset),
     );
   }
 }

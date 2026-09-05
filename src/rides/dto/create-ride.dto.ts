@@ -43,11 +43,28 @@ export class LocationDto {
  * Users submit this when they need a ride
  */
 export class CreateRideDto {
-  // The user requesting the ride (from JWT token in real implementation)
-  @ApiProperty({ example: '123e4567-e89b-42d3-a456-426614174000' })
-  @IsNotEmpty({ message: 'User ID is required' })
+  /**
+   * The rider this ride belongs to.
+   *
+   * SECURITY: this was REQUIRED and taken at face value — the comment that
+   * used to sit here said "from JWT token in real implementation", and it
+   * never became one. Any authenticated rider could book onto another rider's
+   * account, which also meant onto their cashback and their trip history.
+   *
+   * It is now optional and derived from the access token by the controller.
+   * It stays on the DTO only so that BookingChannelsService — which creates
+   * rides on behalf of a guest resolved from a phone number, behind an
+   * internal API key rather than a user token — can pass one explicitly. HTTP
+   * callers that send a value other than their own id are rejected.
+   */
+  @ApiPropertyOptional({
+    example: '123e4567-e89b-42d3-a456-426614174000',
+    description:
+      'Ignored for authenticated riders — the rider is taken from the access token.',
+  })
+  @IsOptional()
   @IsUUID('4', { message: 'User ID must be a valid UUID' })
-  userId: string;
+  userId?: string;
 
   // Where the user wants to be picked up
   @ApiProperty({ type: () => LocationDto })

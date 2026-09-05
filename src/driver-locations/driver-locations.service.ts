@@ -15,6 +15,8 @@ import {
   DRIVER_ACTIVE_PREFIX,
   DRIVER_ACTIVE_RIDE_PREFIX,
 } from '../redis/redis.constants';
+import { Ride, RideStatus } from '../rides/entities/ride.entity';
+import { Role } from '../common/enums/role.enum';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RIDE_EVENTS } from '../websocket/events/ride-events.constants';
 
@@ -33,6 +35,11 @@ export class DriverLocationsService {
   constructor(
     @InjectRepository(Driver)
     private readonly driverRepository: Repository<Driver>,
+
+    // Needed only to answer "does this rider have an active ride with this
+    // driver?" — see canViewDriverLocation.
+    @InjectRepository(Ride)
+    private readonly rideRepository: Repository<Ride>,
 
     // Inject our high-speed Redis client
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -109,6 +116,13 @@ export class DriverLocationsService {
    * 
    * Scalability: Redis searches thousands of drivers instantly.
    */
+  /**
+   * Online drivers within `radiusKm` of a point.
+   *
+   * The radius is clamped by the CALLER (see MAX_NEARBY_RADIUS_KM in the
+   * controller) rather than here, so this stays usable for internal dispatch
+   * where a wide sweep is legitimate.
+   */
   async findNearbyDrivers(
     userLat: number,
     userLng: number,
@@ -154,11 +168,24 @@ export class DriverLocationsService {
       return {
         driver: {
           id: dbDriver.id,
-          name: dbDriver.name,
-          phone: dbDriver.phone,
+          // First name only. This is a DISCOVERY response — it answers "is
+          // anyone near me", which every authenticated rider may ask about
+          // any point on the map. It used to return the driver's full name
+          // and PHONE NUMBER, so `?lat=..&lng=..&radius=20000` returned a
+          // contact list for the entire fleet.
+          //
+          // The rider gets the driver's real contact details once the driver
+          // accepts their ride, from the ride record — at which point there
+          // is an actual relationship between the two.
+          name: firstNameOf(dbDriver.name),
           ratingAverage: dbDriver.ratingAverage,
           totalCompletedRides: dbDriver.totalCompletedRides,
-          vehicles: dbDriver.vehicles,
+          vehicles: (dbDriver.vehicles ?? []).map((vehicle) => ({
+            id: vehicle.id,
+            type: vehicle.type,
+            model: vehicle.model,
+            color: vehicle.color,
+          })),
         },
         distance: Number(distance.toFixed(2)),
         location: {
@@ -170,6 +197,45 @@ export class DriverLocationsService {
 
     // Sort by distance
     return finalResults.sort((a, b) => a.distance - b.distance);
+  }
+
+  /**
+   * May this principal see where that driver is right now?
+   *
+   * Live location is not public information about a person. The rule:
+   *
+   *   - a driver may see their own position;
+   *   - an admin may see anyone's;
+   *   - a rider may see a driver they have an ACTIVE ride with, and nobody
+   *     else — which is the only reason a rider ever needs to watch a
+   *     particular car move.
+   *
+   * Anything else is refused. Before this existed, every authenticated account
+   * could read any driver's exact coordinates by id, and ids are handed out by
+   * the /nearby sweep.
+   */
+  async canViewDriverLocation(
+    principal: { id: string; role: Role } | undefined,
+    driverId: string,
+  ): Promise<boolean> {
+    if (!principal) return false;
+    if (principal.role === Role.ADMIN) return true;
+    if (principal.role === Role.DRIVER) return principal.id === driverId;
+
+    const activeRide = await this.rideRepository.findOne({
+      where: {
+        userId: principal.id,
+        driverId,
+        status: In([
+          RideStatus.ACCEPTED,
+          RideStatus.ARRIVED,
+          RideStatus.IN_PROGRESS,
+        ]),
+      },
+      select: { id: true },
+    });
+
+    return Boolean(activeRide);
   }
 
   /**
@@ -198,4 +264,16 @@ export class DriverLocationsService {
       longitude: parseFloat(pos[0][0]),
     };
   }
+}
+
+/**
+ * The part of a name safe to show before a ride exists.
+ *
+ * Falls back to the whole string when there is no space, and to 'Driver' when
+ * the name is empty — never to undefined, which would render as a blank card.
+ */
+export function firstNameOf(name: string | null | undefined): string {
+  const trimmed = (name ?? '').trim();
+  if (!trimmed) return 'Driver';
+  return trimmed.split(/\s+/)[0];
 }

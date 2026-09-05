@@ -154,6 +154,22 @@ export class EmergencyService {
     return ride.pickup ? { ...ride.pickup } : null;
   }
 
+  /**
+   * The two parties on a ride, for the controller's authorization check.
+   *
+   * Deliberately a projection: the caller has not been authorized yet at the
+   * point this runs, so it must not load anything it would be wrong to show.
+   */
+  async findRideForAuthorization(
+    rideId: string,
+  ): Promise<{ userId: string; driverId: string | null } | null> {
+    const ride = await this.rideRepository.findOne({
+      where: { id: rideId },
+      select: { userId: true, driverId: true },
+    });
+    return ride ? { userId: ride.userId, driverId: ride.driverId } : null;
+  }
+
   async findByRideId(rideId: string): Promise<EmergencyIncident[]> {
     return await this.incidentRepository.find({
       where: { rideId },

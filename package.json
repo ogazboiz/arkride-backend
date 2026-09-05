@@ -17,16 +17,25 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:decane": "ts-node scripts/test-decane-auth.ts",
-    "typeorm": "typeorm-ts-node-commonjs",
-    "migration:generate": "npm run typeorm -- migration:generate",
-    "migration:run": "npm run typeorm -- migration:run",
-    "migration:revert": "npm run typeorm -- migration:revert",
+    "test:e2e": "jest --config ./test/jest-e2e.json --forceExit --runInBand",
+    "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
+    "migration:generate": "pnpm run typeorm -- migration:generate",
+    "migration:run": "pnpm run typeorm -- migration:run",
+    "migration:revert": "pnpm run typeorm -- migration:revert",
     "docker:up": "docker compose up",
     "docker:dev": "docker compose -f compose.dev.yml up",
     "docker:local": "docker compose -f compose.local.yml up",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "migration:create": "typeorm-ts-node-commonjs migration:create",
+    "migration:show": "pnpm run typeorm -- migration:show",
+    "migration:run:prod": "npx typeorm -d dist/data-source.js migration:run",
+    "migration:revert:prod": "npx typeorm -d dist/data-source.js migration:revert",
+    "migration:show:prod": "npx typeorm -d dist/data-source.js migration:show",
+    "schema:sync:dev": "ts-node scripts/dev/sync-schema.ts",
+    "verify:stats": "ts-node scripts/dev/verify-stats.ts",
+    "verify:exploits": "node scripts/dev/exploit-suite.mjs",
+    "verify:openapi": "node scripts/dev/verify-openapi.mjs",
+    "docs:export": "node scripts/dev/export-openapi.mjs"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",
@@ -47,6 +56,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",
     "@nestjs/websockets": "^11.2.3",
+    "@privy-io/node": "0.28.0",
     "@sendgrid/mail": "^8.1.6",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
@@ -54,7 +64,6 @@
     "cache-manager": "^7.2.8",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
-    "decane-node": "^1.3.0",
     "dotenv": "^17.2.3",
     "helmet": "^8.1.0",
     "ioredis": "^5.10.1",
@@ -108,8 +117,22 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "allowJs": true,
+            "module": "commonjs",
+            "moduleResolution": "node",
+            "esModuleInterop": true,
+            "isolatedModules": false
+          }
+        }
+      ]
     },
+    "transformIgnorePatterns": [
+      "node_modules/(?!.*jose)"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

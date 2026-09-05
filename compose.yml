@@ -9,6 +9,15 @@ services:
     container_name: arkrides-api
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Stated explicitly, and LAST, so it wins over anything in .env.
+      #
+      # This file is what the deploy workflow brings up, and it used to take
+      # NODE_ENV from .env alone — where .env.example sets `development`. A
+      # production host that copied the example would have served Swagger
+      # publicly, allowlisted localhost for CORS, and skipped every
+      # production-only environment check.
+      NODE_ENV: ${NODE_ENV:-production}
     ports:
       - '4010:4010'
     depends_on:
@@ -37,7 +46,9 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass redis_password_dev
+    # The password is supplied by the environment. It used to be the literal
+    # string `redis_password_dev`, committed to the repository.
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     ports:
       - '6379:6379'
     volumes:

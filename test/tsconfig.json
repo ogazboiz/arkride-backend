@@ -1,0 +1,15 @@
+{
+  // The root tsconfig excludes `test/` so that `nest build` does not emit the
+  // e2e suite into dist. The side effect was that editors could not resolve
+  // `describe`, `it` or `expect` in this directory and showed an error on every
+  // line of every test.
+  //
+  // This config exists purely for the editor and for `tsc --noEmit` runs
+  // scoped to the tests; the jest-e2e.json transform supplies its own options.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["jest", "node"],
+    "noEmit": true
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts"]
+}

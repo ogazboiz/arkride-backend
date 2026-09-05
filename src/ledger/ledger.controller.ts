@@ -7,6 +7,8 @@ import {
   ForbiddenException,
   UseGuards,
 } from '@nestjs/common';
+import { enveloped, listMeta } from '../common/dto/api-response';
+import { clampLimit, clampOffset } from '../common/utils/pagination.util';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LedgerService } from './ledger.service';
 import { StakeholderType } from './entities/ledger-entry.entity';
@@ -52,11 +54,18 @@ export class LedgerController {
     const { entries, total } = await this.ledgerService.findByStakeholder(
       stakeholderType,
       req.user.id,
-      Number(limit),
-      Number(offset),
+      clampLimit(limit),
+      clampOffset(offset),
     );
 
-    return { stakeholderType, count: entries.length, total, entries };
+    // `total` here is the running BALANCE, not a row count — it is a sum of
+    // signed amounts. It stays in `data` alongside the entries because it is a
+    // domain fact about the statement, not pagination.
+    return enveloped(
+      { stakeholderType, balance: total, entries },
+      'Ledger entries fetched',
+      listMeta(entries),
+    );
   }
 
   /**
@@ -80,11 +89,15 @@ export class LedgerController {
     const { entries, total } = await this.ledgerService.findByStakeholder(
       StakeholderType.DRIVER,
       driverId,
-      Number(limit),
-      Number(offset),
+      clampLimit(limit),
+      clampOffset(offset),
     );
 
-    return { count: entries.length, total, entries };
+    return enveloped(
+      { balance: total, entries },
+      'Ledger entries fetched',
+      listMeta(entries),
+    );
   }
 
   /**
@@ -97,7 +110,7 @@ export class LedgerController {
   @ApiOperation({ summary: 'Get all ledger entries for a ride' })
   async getRideEntries(@Param('rideId') rideId: string) {
     const entries = await this.ledgerService.findByRideId(rideId);
-    return { count: entries.length, entries };
+    return enveloped(entries, undefined, listMeta(entries));
   }
 
   /**

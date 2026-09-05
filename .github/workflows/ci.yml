@@ -1,0 +1,131 @@
+name: CI
+
+# The deploy workflow builds an image and ships it. It has never run a test or
+# a typecheck, so a branch could go to production with a failing suite and
+# nothing would say so. This runs on every push and pull request, and it is
+# what `deploy.yml` now waits for.
+
+on:
+  push:
+    branches: [main, staging, development]
+  pull_request:
+  # Called by deploy.yml, so a deploy cannot skip these checks.
+  workflow_call:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arkrides_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Unit tests
+        run: pnpm test
+
+      # The schema had six tables that no migration created, and nobody noticed
+      # because `synchronize` built them on developers' machines while
+      # `migration:run` had never worked in a container. Building it from empty
+      # on every push is the check that would have caught that.
+      - name: Migrations build the schema from empty
+        env:
+          NODE_ENV: test
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USERNAME: postgres
+          DATABASE_PASSWORD: postgres
+          DATABASE_NAME: arkrides_ci
+        run: pnpm migration:run
+
+      # And that the migrated schema still matches what the entities describe.
+      - name: Migrated schema matches the entities
+        env:
+          NODE_ENV: test
+          SYNC_HOST: localhost
+          SYNC_PORT: 5432
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE arkrides_ci_ref;'
+          pnpm schema:sync:dev arkrides_ci_ref
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d arkrides_ci \
+            --schema-only --no-owner --no-privileges | grep -v migrations | sort > /tmp/migrated.sql
+          PGPASSWORD=postgres pg_dump -h localhost -U postgres -d arkrides_ci_ref \
+            --schema-only --no-owner --no-privileges | grep -v migrations | sort > /tmp/reference.sql
+          diff /tmp/reference.sql /tmp/migrated.sql
+
+      # Every stats aggregate, against real SQL. None of it is exercised by a
+      # unit test with a mocked repository.
+      - name: Stats queries run against Postgres
+        env:
+          NODE_ENV: test
+          SYNC_HOST: localhost
+          SYNC_PORT: 5432
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE arkrides_ci_stats;'
+          pnpm verify:stats arkrides_ci_stats
+
+      # The OpenAPI document is only useful if it is true. This boots the app
+      # and asserts the documented shapes still match live responses — the
+      # drift it was written for made all 67 documented responses wrong at once.
+      - name: OpenAPI document matches reality
+        env:
+          NODE_ENV: development
+          PORT: 4010
+          JWT_SECRET: ci-only-secret-value-that-is-long-enough-0123456789
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USERNAME: postgres
+          DATABASE_PASSWORD: postgres
+          DATABASE_NAME: arkrides_ci
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          pnpm build
+          node dist/main.js &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4010/api-json >/dev/null && break || sleep 2
+          done
+          pnpm verify:openapi
+
+      # Lint is REPORTED, not enforced. There is a large amount of pre-existing
+      # lint debt in this repository that predates this workflow; failing the
+      # build on it would mean nobody could merge anything. Making it visible is
+      # the first step to paying it down.
+      - name: Lint (advisory)
+        run: pnpm lint || true
+        continue-on-error: true

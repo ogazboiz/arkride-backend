@@ -15,6 +15,7 @@ import { UpdateDriverDto } from './dto/update-driver.dto';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import { EmailService } from '../common/services/email.service';
+import { TokenService } from '../auth/services/token.service';
 import { OtpUtil } from '../common/utils/otp.util';
 import { Role } from '../common/enums/role.enum';
 
@@ -29,6 +30,7 @@ export class DriversService {
     private readonly vehicleRepository: Repository<Vehicle>,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly tokenService: TokenService,
   ) { }
 
   async create(createDriverDto: CreateDriverDto) {
@@ -114,11 +116,11 @@ export class DriversService {
     await this.vehicleRepository.save(vehicle);
 
     // Generate token for immediate login
-    const token = this.generateToken(driver);
+    const session = await this.issueSession(driver);
 
     return {
       driver: this.sanitizeDriver(driver),
-      token,
+      ...session,
     };
   }
 
@@ -130,6 +132,17 @@ export class DriversService {
 
     if (!driver) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // A driver who signed up through Privy has no password. Say so plainly
+    // rather than returning "invalid credentials" — they would otherwise sit
+    // there retrying a password that does not exist. This reveals nothing an
+    // attacker can use: they already had to know a registered email, and the
+    // remedy it points at (sign in with Privy) is the public sign-in method.
+    if (!driver.password) {
+      throw new UnauthorizedException(
+        'This account signs in with Privy. Use Privy sign-in instead of a password.',
+      );
     }
 
     const isPasswordValid = await bcrypt.compare(
@@ -145,12 +158,12 @@ export class DriversService {
       throw new UnauthorizedException('Your account has been deactivated');
     }
 
-    const token = this.generateToken(driver);
+    const session = await this.issueSession(driver);
 
     return {
       message: 'Login successful',
       driver: this.sanitizeDriver(driver),
-      token,
+      ...session,
     };
   }
 
@@ -194,16 +207,8 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    // Check if email is being updated and if it's already taken by another driver
-    if (updateDriverDto.email && updateDriverDto.email !== driver.email) {
-      const existingDriver = await this.driversRepository.findOne({
-        where: { email: updateDriverDto.email },
-      });
-
-      if (existingDriver) {
-        throw new ConflictException('Email already in use');
-      }
-    }
+    // (An email uniqueness check used to live here. `email` is no longer on
+    // UpdateDriverDto — see the DTO for why — so there is nothing to check.)
 
     // Check if phone is being updated and if it's already taken by another driver
     if (updateDriverDto.phone && updateDriverDto.phone !== driver.phone) {
@@ -235,12 +240,13 @@ export class DriversService {
       }
     }
 
-    // If password is being updated, hash it
-    if (updateDriverDto.password) {
-      updateDriverDto.password = await bcrypt.hash(updateDriverDto.password, 10);
-    }
-
-    // Update the driver
+    // NOTE: `password` and `email` are deliberately not on UpdateDriverDto —
+    // password changes go through forgot-password/reset-password, and an email
+    // change would need re-verification. There is therefore nothing to hash
+    // here, and Object.assign below cannot reach a credential column.
+    //
+    // Object.assign is only safe because the DTO is a written-out allowlist.
+    // If anyone widens that DTO, this line widens with it.
     Object.assign(driver, updateDriverDto);
     const updatedDriver = await this.driversRepository.save(driver);
 
@@ -266,12 +272,28 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    // Only approved drivers can go online
-    // if (isOnline && driver.verificationStatus !== VerificationStatus.APPROVED) {
-    //   throw new BadRequestException(
-    //     'Only approved drivers can go online. Please wait for admin approval.',
-    //   );
-    // }
+    // Only approved drivers may take rides.
+    //
+    // This check was commented out, which made `verificationStatus` decorative:
+    // a driver whose licence had never been reviewed could go online, appear in
+    // /drivers/available and accept passengers. Combined with the (now fixed)
+    // self-approval hole on PATCH /drivers/:id, there was no point at which
+    // anyone had to look at a licence.
+    //
+    // Going OFFLINE is always allowed regardless of status — a suspended driver
+    // must still be able to remove themselves from dispatch.
+    if (isOnline && driver.verificationStatus !== VerificationStatus.APPROVED) {
+      throw new BadRequestException(
+        'Only approved drivers can go online. Your account is currently ' +
+          `${driver.verificationStatus}.`,
+      );
+    }
+
+    if (isOnline && !driver.isActive) {
+      throw new BadRequestException(
+        'This driver account is suspended and cannot go online.',
+      );
+    }
 
     const previousIsOnline = driver.isOnline;
 
@@ -297,12 +319,63 @@ export class DriversService {
 
     driver.verificationStatus = status;
 
-    // If rejected, set driver offline
-    if (status === VerificationStatus.REJECTED) {
+    // Anything other than approved must also take them off dispatch. Rejecting
+    // a driver who was already online used to leave them online and taking
+    // rides until they happened to toggle it themselves.
+    if (status !== VerificationStatus.APPROVED) {
       driver.isOnline = false;
     }
 
     const updatedDriver = await this.driversRepository.save(driver);
+
+    // Losing approval ends the session too — the same reasoning as suspension.
+    if (status !== VerificationStatus.APPROVED) {
+      await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
+    }
+
+    this.logger.log({
+      message: 'Driver verification status changed',
+      driverId: driver.id,
+      status,
+    });
+
+    return this.sanitizeDriver(updatedDriver);
+  }
+
+  /**
+   * Admin suspension / reinstatement.
+   *
+   * Suspending also forces the driver offline in the same write, so a
+   * suspended driver cannot keep serving the rides they already had queued
+   * up in the dispatch list.
+   */
+  async updateActiveStatus(id: string, isActive: boolean, reason?: string) {
+    const driver = await this.driversRepository.findOne({ where: { id } });
+
+    if (!driver) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    driver.isActive = isActive;
+    if (!isActive) {
+      driver.isOnline = false;
+    }
+
+    const updatedDriver = await this.driversRepository.save(driver);
+
+    // Suspension has to END THE SESSION, not just set a flag. Access tokens
+    // last an hour and refresh tokens thirty days, so without this a suspended
+    // driver kept working for up to a month. TokenService.revokeAllForSubject
+    // existed for exactly this and had no caller.
+    if (!isActive) {
+      await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
+    }
+
+    this.logger.log({
+      message: isActive ? 'Driver reinstated' : 'Driver suspended',
+      driverId: driver.id,
+      reason: reason ?? null,
+    });
 
     return this.sanitizeDriver(updatedDriver);
   }
@@ -314,6 +387,10 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
+    // Sessions first: there is no foreign key from refresh_tokens.subjectId,
+    // so deleting the driver would otherwise leave live tokens pointing at a
+    // row that no longer exists.
+    await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
     await this.driversRepository.remove(driver);
   }
 
@@ -369,7 +446,8 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    if (!driver.otpCode || driver.otpCode !== dto.otp) {
+    // Constant-time — see OtpUtil.matches.
+    if (!OtpUtil.matches(dto.otp, driver.otpCode)) {
       throw new BadRequestException('Invalid OTP');
     }
 
@@ -411,16 +489,23 @@ export class DriversService {
     });
   }
 
-  private generateToken(driver: Driver): string {
-    const payload = {
-      sub: driver.id,
-      email: driver.email,
-      role: driver.role || Role.DRIVER,
-      type: 'driver'
-    };
-    console.log('Signing driver JWT payload:', payload);
-
-    return this.jwtService.sign(payload);
+  /**
+   * Issue a full session for a driver. See AuthService.issueSession for why a
+   * bare signed token is no longer enough.
+   *
+   * The `console.log('Signing driver JWT payload:', payload)` that used to sit
+   * here printed the driver's id, email and role to stdout on every single
+   * login. It is gone.
+   */
+  private async issueSession(
+    driver: Driver,
+    context: { userAgent?: string | null; ipAddress?: string | null } = {},
+  ) {
+    const session = await this.tokenService.issueSession(
+      { id: driver.id, role: driver.role || Role.DRIVER, isDriver: true },
+      context,
+    );
+    return { ...session, token: session.accessToken };
   }
 
   private sanitizeDriver(driver: Driver) {

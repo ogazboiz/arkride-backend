@@ -1,52 +1,80 @@
-import { IsEmail, IsString, Length } from 'class-validator';
+import { IsEmail, IsString, Length, Matches } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { OtpUtil } from '../../common/utils/otp.util';
 
 /**
  * DriverResetPasswordDto
- * 
+ *
  * Purpose: Validate OTP and new password when driver resets password
- * 
+ *
  * Used in: POST /api/v1/drivers/reset-password
- * 
+ *
  * Example Request Body:
  * {
  *   "email": "driver@example.com",
- *   "otp": "1234",
+ *   "otp": "123456",
  *   "newPassword": "NewSecurePassword123!"
  * }
  */
 export class DriverResetPasswordDto {
   /**
    * Driver's email address
-   * 
+   *
    * Validation:
    * - Must be a valid email format
    */
+  @ApiProperty({
+    example: 'musa.driver@example.com',
+    description: 'The email the reset OTP was sent to.',
+  })
   @IsEmail()
   email: string;
 
   /**
    * One-Time Password sent to email
-   * 
+   *
    * Validation:
-   * - Must be exactly 4 digits
+   * - Must be exactly OtpUtil.LENGTH digits
    * - Must match the OTP stored in database
    * - Must not be expired (10 minutes validity)
    */
+  @ApiProperty({
+    example: '123456',
+    minLength: OtpUtil.LENGTH,
+    maxLength: OtpUtil.LENGTH,
+    description: `The ${OtpUtil.LENGTH}-digit code emailed by /drivers/forgot-password. Valid for 10 minutes.`,
+  })
   @IsString()
-  @Length(4, 4, { message: 'OTP must be exactly 4 digits' })
+  // Length AND alphabet come from OtpUtil, so the validator and the generator
+  // cannot drift apart again. They already had: the generator was widened from
+  // four digits to six for the entropy, and these DTOs kept `@Length(4, 4)` —
+  // which rejected every genuine code and killed verify-otp and password reset
+  // outright.
+  //
+  // The digits-only rule matters separately: OtpUtil.matches pads to a fixed
+  // 64-byte buffer, and a multi-byte character can exceed that, so a non-ASCII
+  // submission would otherwise reach timingSafeEqual with mismatched lengths.
+  @Length(OtpUtil.LENGTH, OtpUtil.LENGTH, {
+    message: `OTP must be exactly ${OtpUtil.LENGTH} digits`,
+  })
+  @Matches(/^[0-9]+$/, { message: 'OTP must contain only digits' })
   otp: string;
 
   /**
    * New password for the account
-   * 
+   *
    * Validation:
    * - Must be a non-empty string
    * - Will be hashed before storing in database
-   * 
+   *
    * Security:
    * - Password should meet minimum requirements (enforce in frontend)
    * - Old password is not required (passwordless reset via OTP)
    */
+  @ApiProperty({
+    example: 'NewSecurePassword123!',
+    description: 'The new password.',
+  })
   @IsString()
   newPassword: string;
 }

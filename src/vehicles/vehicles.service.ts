@@ -20,7 +20,16 @@ export class VehiclesService {
     private readonly driverRepository: Repository<Driver>,
   ) {}
 
-  async create(createVehicleDto: CreateVehicleDto): Promise<Vehicle> {
+  /**
+   * `driverId` is REQUIRED here even though it is optional on the DTO.
+   *
+   * The controller resolves the real owner from the access token and passes it
+   * in; typing the parameter this way makes it impossible to reach this method
+   * with a client-chosen owner, or with none at all.
+   */
+  async create(
+    createVehicleDto: CreateVehicleDto & { driverId: string },
+  ): Promise<Vehicle> {
     // Check if driver exists
     const driver = await this.driverRepository.findOne({
       where: { id: createVehicleDto.driverId },
@@ -163,11 +172,21 @@ export class VehiclesService {
     return this.sanitizeVehicle(updatedVehicle);
   }
 
+  /**
+   * Strip the driver's credential before a vehicle leaves the service.
+   *
+   * Returns a COPY. The previous version assigned over `vehicle.driver` in
+   * place, which mutates the caller's object — and when the same managed
+   * entity is reachable from two places (a ride eagerly loading
+   * `vehicle.driver`, say), redacting it for one response silently redacts it
+   * for the other.
+   */
   private sanitizeVehicle(vehicle: Vehicle): Vehicle {
-    if (vehicle.driver) {
-      const { password, ...sanitizedDriver } = vehicle.driver;
-      vehicle.driver = sanitizedDriver as Driver;
-    }
-    return vehicle;
+    if (!vehicle.driver) return vehicle;
+    const { password, otpCode, otpExpiry, ...sanitizedDriver } = vehicle.driver;
+    // The cast is deliberate and narrow: the returned object is intentionally
+    // NOT a complete Driver — the three credential fields are gone, which is
+    // the entire point — but the response type stays Vehicle for callers.
+    return { ...vehicle, driver: sanitizedDriver as unknown as Driver };
   }
 }

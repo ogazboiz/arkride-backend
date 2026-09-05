@@ -47,6 +47,18 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
+# NOTE: pnpm is deliberately NOT installed here, and must not be assumed.
+#
+# The builder stage runs `pnpm prune --prod`, and this stage copies only
+# package.json, node_modules and dist. There is no pnpm on the image and no
+# ts-node in node_modules, so anything invoked at runtime has to work with
+# plain node/npx against COMPILED JavaScript.
+#
+# In particular the migration step is
+#   npx typeorm -d dist/data-source.js migration:run
+# and NOT `pnpm run migration:run` (no pnpm) or the ts-node variant (pruned).
+# Both of those have been shipped here before and both fail on start.
+
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist

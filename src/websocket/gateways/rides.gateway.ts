@@ -32,6 +32,18 @@ import type {
   DriverLocationEvent,
   EmergencyEvent,
 } from '../events/ride-events.constants';
+import { requireJwtSecret } from '../../config/jwt.config';
+
+/**
+ * Ride ids are UUIDs. Anything else must be rejected before it reaches
+ * Postgres, which raises 22P02 for a malformed uuid — an exception with
+ * nowhere useful to go inside a socket handler.
+ */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+import { corsOptions } from '../../config/cors.config';
+import { Ride } from '../../rides/entities/ride.entity';
+import { isPartyToRide } from '../../common/utils/ownership.util';
 
 /**
  * RidesGateway
@@ -57,9 +69,13 @@ import type {
 @WebSocketGateway({
   namespace: '/rides',
   // Socket.IO negotiates its own CORS — app.enableCors() in main.ts is
-  // Express-level only and does NOT cover this handshake. If origins are ever
-  // locked down for production, both places must be changed together.
-  cors: { origin: true, credentials: true },
+  // Express-level only and does NOT cover this handshake, which is why this
+  // has to be stated separately.
+  //
+  // It used to be `{ origin: true, credentials: true }`: reflect ANY origin,
+  // with credentials. Both policies now read the same CORS_ORIGINS allowlist,
+  // so they cannot drift apart again.
+  cors: corsOptions(),
 })
 export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RidesGateway.name);
@@ -73,6 +89,9 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly authResolver: AuthResolverService,
     @InjectRepository(Vehicle)
     private readonly vehicleRepository: Repository<Vehicle>,
+    // Needed to answer "is this socket allowed in this ride's room?".
+    @InjectRepository(Ride)
+    private readonly rideRepository: Repository<Ride>,
   ) {}
 
   // ==================== CONNECTION LIFECYCLE ====================
@@ -93,7 +112,7 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       const payload = await this.jwtService.verifyAsync(token, {
         secret:
-          this.configService.get<string>('JWT_SECRET') || 'your-secret-key',
+          requireJwtSecret(this.configService),
       });
 
       const principal = await this.authResolver.resolvePrincipal(payload);
@@ -171,6 +190,12 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
    *
    * Membership is authorised against the ride the socket claims: a driver may
    * only join a ride assigned to them, a rider only their own.
+   *
+   * That paragraph was already written here — but nothing implemented it. The
+   * handler joined whatever room it was handed, so any authenticated socket
+   * could `join:ride` with any UUID and receive that trip's live driver GPS,
+   * the rider's name/email/phone, the fare breakdown, and its SOS alerts.
+   * A comment is not an access control.
    */
   @SubscribeMessage(WS_CLIENT_EVENTS.JOIN_RIDE)
   async handleJoinRide(
@@ -180,6 +205,45 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const rideId = body?.rideId;
     if (!rideId) {
       return { status: 'error', message: 'rideId is required' };
+    }
+
+    // Validate the SHAPE before it reaches the database.
+    //
+    // `rideId` comes verbatim from a client message. A non-UUID makes Postgres
+    // raise 22P02, which surfaces as a QueryFailedError inside a socket
+    // handler — a place with no HTTP response to turn it into a 400. Checking
+    // here keeps a malformed id a normal error answer instead of an exception
+    // travelling up through the transport.
+    if (!UUID_PATTERN.test(rideId)) {
+      return { status: 'error', message: 'rideId must be a UUID' };
+    }
+
+    const principal = client.data?.principal;
+    if (!principal) {
+      // Should be unreachable: handleConnection rejects unauthenticated
+      // sockets. Belt and braces, because the cost of being wrong here is
+      // someone else's live location.
+      return { status: 'error', message: 'Not authenticated' };
+    }
+
+    const ride = await this.rideRepository.findOne({
+      where: { id: rideId },
+      select: { id: true, userId: true, driverId: true },
+    });
+
+    if (!ride) {
+      return { status: 'error', message: 'Ride not found' };
+    }
+
+    if (!isPartyToRide(principal, ride)) {
+      this.logger.warn({
+        message: 'Socket refused entry to a ride room',
+        socketId: client.id,
+        principalId: principal.id,
+        principalRole: principal.role,
+        rideId,
+      });
+      return { status: 'error', message: 'You are not part of this ride' };
     }
 
     await client.join(ROOMS.ride(rideId));
@@ -192,8 +256,8 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: { rideId?: string },
   ) {
     const rideId = body?.rideId;
-    if (!rideId) {
-      return { status: 'error', message: 'rideId is required' };
+    if (!rideId || !UUID_PATTERN.test(rideId)) {
+      return { status: 'error', message: 'rideId must be a UUID' };
     }
 
     await client.leave(ROOMS.ride(rideId));
