@@ -6,6 +6,10 @@ import { Keyv } from 'keyv';
 import KeyvRedis from '@keyv/redis';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from './redis.constants';
+import {
+  redisConnection,
+  redisConnectionUrl,
+} from '../config/redis.config';
 
 /**
  * RedisModule
@@ -27,7 +31,9 @@ import { REDIS_CLIENT } from './redis.constants';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
-        const redisUrl = `redis://${configService.get('REDIS_HOST') || 'localhost'}:${configService.get('REDIS_PORT') || 6379}`;
+        // Was built by hand WITHOUT the password, so it could only ever
+        // reach an unauthenticated Redis. Every managed Redis requires auth.
+        const redisUrl = redisConnectionUrl(configService);
         
         return {
           stores: [
@@ -46,17 +52,19 @@ import { REDIS_CLIENT } from './redis.constants';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
-        const connectionConfig: any = {
-          host: configService.get('REDIS_HOST') || 'localhost',
-          port: configService.get('REDIS_PORT') || 6379,
+        const { host, port, password, username, tls } =
+          redisConnection(configService);
+
+        return {
+          connection: {
+            host,
+            port,
+            ...(password ? { password } : {}),
+            ...(username ? { username } : {}),
+            // `rediss://` means the provider terminates TLS.
+            ...(tls ? { tls: {} } : {}),
+          },
         };
-
-        const redisPassword = configService.get('REDIS_PASSWORD');
-        if (redisPassword) {
-          connectionConfig.password = redisPassword;
-        }
-
-        return { connection: connectionConfig };
       },
     }),
 
@@ -80,10 +88,18 @@ import { REDIS_CLIENT } from './redis.constants';
       provide: REDIS_CLIENT,
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
+        const { host, port, password, username, tls } =
+          redisConnection(configService);
+
         return new Redis({
-          host: configService.get('REDIS_HOST') || 'localhost',
-          port: configService.get('REDIS_PORT') || 6379,
-          password: configService.get('REDIS_PASSWORD'),
+          host,
+          port,
+          ...(password ? { password } : {}),
+          ...(username ? { username } : {}),
+          ...(tls ? { tls: {} } : {}),
+          // BullMQ requires this; without it a blocking command that loses the
+          // connection throws instead of reconnecting.
+          maxRetriesPerRequest: null,
         });
       },
     },

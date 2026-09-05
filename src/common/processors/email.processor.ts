@@ -1,4 +1,5 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import sgMail from '@sendgrid/mail';
 
@@ -14,10 +15,29 @@ import sgMail from '@sendgrid/mail';
  */
 @Processor('email')
 export class EmailProcessor extends WorkerHost {
+  private readonly logger = new Logger(EmailProcessor.name);
+
+  /**
+   * Whether email can actually be sent.
+   *
+   * Read once at construction, because it cannot change without a restart.
+   *
+   * When SendGrid is not configured the processor discards the job with a
+   * warning instead of attempting a send. That matters: `sgMail.send` with an
+   * empty API key throws, BullMQ retries with backoff, and the queue fills
+   * with jobs that can never succeed — burning Redis and filling the logs to
+   * deliver an email that was never going to arrive. Failing fast and saying
+   * why is more honest and much cheaper.
+   */
+  private readonly configured =
+    Boolean(process.env.SENDGRID_API_KEY) &&
+    Boolean(process.env.SENDGRID_FROM_EMAIL);
+
   constructor() {
     super();
-    // Initialize SendGrid with the API key
-    sgMail.setApiKey(process.env.SENDGRID_API_KEY || '');
+    if (this.configured) {
+      sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
+    }
   }
 
   /**
@@ -25,6 +45,16 @@ export class EmailProcessor extends WorkerHost {
    */
   async process(job: Job<any, any, string>): Promise<any> {
     const { to, otp, name } = job.data;
+
+    if (!this.configured) {
+      // Deliberately does NOT throw: a thrown job is retried, and no number of
+      // retries will conjure an API key. Dropped, loudly, once.
+      this.logger.warn(
+        `Email "${job.name}" not sent — SendGrid is not configured. ` +
+          `Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL to enable delivery.`,
+      );
+      return { skipped: true, reason: 'sendgrid-not-configured' };
+    }
 
     switch (job.name) {
       case 'sendOtp':
