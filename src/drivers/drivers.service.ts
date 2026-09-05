@@ -124,6 +124,105 @@ export class DriversService {
     };
   }
 
+  /**
+   * Provision a driver from a verified Privy identity plus the details the
+   * driver app collected. Mirrors `create()` but:
+   *   - no password (Privy is the credential),
+   *   - email/wallet come from the SIGNED Privy token, never a request body,
+   *   - the account is APPROVED on creation so it can go online immediately
+   *     (demo onboarding — the normal path leaves a new driver PENDING).
+   *
+   * Returns the saved Driver; the caller (PrivyAuthService) issues the session
+   * so token minting stays in one place.
+   */
+  async createFromPrivy(params: {
+    did: string;
+    email: string | null;
+    walletAddressEvm: string | null;
+    details: {
+      name: string;
+      phone: string;
+      licenseNumber: string;
+      licenseExpiry: string;
+      vehicleType: string;
+      plateNumber: string;
+      vehicleColor: string;
+      vehicleModel: string;
+      vehicleYear: string | number;
+    };
+  }): Promise<Driver> {
+    const { did, walletAddressEvm, details } = params;
+    // Privy accounts may have no email (phone/wallet login); a DID-keyed
+    // placeholder keeps the NOT NULL unique column satisfiable. Only the
+    // VERIFIED address is ever used here.
+    const email = params.email || `${did}@privy.arkrides.local`;
+
+    if (await this.driversRepository.findOne({ where: { email } })) {
+      throw new ConflictException('Email already exists');
+    }
+    if (
+      await this.driversRepository.findOne({ where: { phone: details.phone } })
+    ) {
+      throw new ConflictException('Phone number already exists');
+    }
+    if (
+      await this.driversRepository.findOne({
+        where: { licenseNumber: details.licenseNumber },
+      })
+    ) {
+      throw new ConflictException('License number already exists');
+    }
+    if (
+      await this.vehicleRepository.findOne({
+        where: { plateNumber: details.plateNumber },
+      })
+    ) {
+      throw new ConflictException(
+        'Vehicle with this plate number already exists',
+      );
+    }
+
+    const expiryDate = new Date(details.licenseExpiry);
+    if (expiryDate <= new Date()) {
+      throw new BadRequestException(
+        'License has expired or expiry date is invalid',
+      );
+    }
+
+    const newDriver = this.driversRepository.create({
+      name: details.name,
+      phone: details.phone,
+      email,
+      password: null,
+      privyDid: did,
+      walletAddressEvm: walletAddressEvm ?? null,
+      licenseNumber: details.licenseNumber,
+      licenseExpiry: details.licenseExpiry,
+      // Demo onboarding: approved on creation so the driver can go online.
+      verificationStatus: VerificationStatus.APPROVED,
+      isOnline: false,
+      isActive: true,
+      ratingAverage: 0,
+      totalCompletedRides: 0,
+      walletBalance: 0,
+    });
+
+    const driver = await this.driversRepository.save(newDriver);
+
+    const vehicle = this.vehicleRepository.create({
+      driverId: driver.id,
+      type: details.vehicleType as VehicleType,
+      plateNumber: details.plateNumber,
+      color: details.vehicleColor,
+      model: details.vehicleModel,
+      year: Number(details.vehicleYear),
+      isActive: true,
+    });
+    await this.vehicleRepository.save(vehicle);
+
+    return driver;
+  }
+
   async login(loginDto: { email: string; password: string }) {
     const driver = await this.driversRepository.findOne({
       where: { email: loginDto.email },
