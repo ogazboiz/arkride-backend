@@ -9,8 +9,6 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Req,
-  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -28,8 +26,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../common/enums/role.enum';
-import { VerificationStatus } from './entities/driver.entity';
-import { assertOwnership, isAdmin } from '../common/utils/ownership.util';
+import { assertOwnership } from '../common/utils/ownership.util';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { Principal } from '../common/utils/ownership.util';
 import { DriverLoginDto } from './dto/driver-login.dto';
@@ -42,7 +39,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { enveloped } from '../common/dto/api-response';
+import { enveloped, listMeta } from '../common/dto/api-response';
 
 @ApiTags('Drivers')
 @Controller('api/v1/drivers')
@@ -51,7 +48,10 @@ export class DriversController {
 
   constructor(private readonly driversService: DriversService) {}
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new driver' })
@@ -68,7 +68,10 @@ export class DriversController {
     );
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Driver login' })
@@ -83,10 +86,7 @@ export class DriversController {
   @Roles(Role.ADMIN)
   async findAll() {
     const drivers = await this.driversService.findAll();
-    return {
-      count: drivers.length,
-      drivers,
-    };
+    return enveloped(drivers, undefined, listMeta(drivers));
   }
 
   /**
@@ -99,10 +99,7 @@ export class DriversController {
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() principal: Principal,
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() principal: Principal) {
     assertOwnership(principal, id, 'view your own driver profile');
     return await this.driversService.findOne(id);
   }
@@ -142,13 +139,13 @@ export class DriversController {
   async updateOnlineStatus(
     @Param('id') id: string,
     @Body() updateOnlineStatusDto: UpdateDriverOnlineStatusDto,
-    @Req() req,
+    @CurrentUser() principal: Principal,
   ) {
     this.logger.log({
       message: 'Driver online status update requested',
       driverIdParam: id,
-      authenticatedUserId: req.user?.id,
-      authenticatedUserRole: req.user?.role,
+      authenticatedUserId: principal?.id,
+      authenticatedUserRole: principal?.role,
       bodyKeys: Object.keys(updateOnlineStatusDto ?? {}),
       isOnline: updateOnlineStatusDto?.isOnline,
       isOnlineType: typeof updateOnlineStatusDto?.isOnline,
@@ -158,7 +155,7 @@ export class DriversController {
     // silently contradicted ownership.util's stated rule that an admin may act
     // on anything. The whole point of that file is that these stop being
     // written per handler.
-    assertOwnership(req.user, id, 'update your own online status');
+    assertOwnership(principal, id, 'update your own online status');
 
     const driver = await this.driversService.updateOnlineStatus(
       id,
@@ -171,7 +168,10 @@ export class DriversController {
       isOnline: driver.isOnline,
     });
 
-    return enveloped(driver, `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`);
+    return enveloped(
+      driver,
+      `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`,
+    );
   }
 
   @Patch(':id/verification-status')
@@ -213,17 +213,26 @@ export class DriversController {
       dto.isActive,
       dto.reason,
     );
-    return enveloped(driver, `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`);
+    return enveloped(
+      driver,
+      `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`,
+    );
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: DriverForgotPasswordDto) {
     return await this.driversService.forgotPassword(dto);
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: DriverResetPasswordDto) {
@@ -238,10 +247,10 @@ export class DriversController {
   @ApiOperation({ summary: 'Delete a driver' })
   @ApiParam({ name: 'id', description: 'Driver UUID' })
   @ApiNoContentResponse({ description: 'Driver deleted successfully.' })
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id') id: string): Promise<void> {
     await this.driversService.remove(id);
-    return {
-        message: "Driver deleted successfully"
-    }
+    // 204 carries no body. The object that used to be returned here was
+    // discarded by Express and the caller silently received nothing — the same
+    // bug already fixed on the vehicles controller.
   }
 }

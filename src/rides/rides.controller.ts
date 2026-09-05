@@ -8,24 +8,31 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  Request,
   ForbiddenException,
 } from '@nestjs/common';
 import { RidesService } from './rides.service';
 import { CreateRideDto } from './dto/create-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { UpdateRideStatusDto } from './dto/update-ride-status.dto';
-import { EstimateRideDto, RideOptionDto, EstimateResponseDto } from './dto/estimate-ride.dto';
+import { EstimateRideDto, EstimateResponseDto } from './dto/estimate-ride.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Public } from '../auth/decorators/public.decorator';
 import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { assertOwnership, assertPartyToRide } from '../common/utils/ownership.util';
+import {
+  assertOwnership,
+  assertPartyToRide,
+} from '../common/utils/ownership.util';
 import type { Principal } from '../common/utils/ownership.util';
-import { enveloped } from '../common/dto/api-response';
-import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { enveloped, listMeta } from '../common/dto/api-response';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 /**
  * Rides Controller
@@ -62,7 +69,10 @@ export class RidesController {
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get ride price estimates' })
   @ApiBody({ type: EstimateRideDto })
-  @ApiOkResponse({ description: 'Estimates calculated successfully.', type: EstimateResponseDto })
+  @ApiOkResponse({
+    description: 'Estimates calculated successfully.',
+    type: EstimateResponseDto,
+  })
   async estimateRide(@Body() estimateDto: EstimateRideDto) {
     const estimates = await this.ridesService.estimateRide(estimateDto);
     return enveloped(estimates, 'Estimates calculated successfully');
@@ -98,7 +108,9 @@ export class RidesController {
       createRideDto.userId !== undefined &&
       createRideDto.userId !== principal.id
     ) {
-      throw new ForbiddenException('You cannot request a ride for another user.');
+      throw new ForbiddenException(
+        'You cannot request a ride for another user.',
+      );
     }
 
     const ride = await this.ridesService.createRide({
@@ -126,10 +138,7 @@ export class RidesController {
     // (i.e. home and work), fares, and the driver on each trip.
     assertOwnership(principal, userId, 'view your own ride history');
     const rides = await this.ridesService.findByUserId(userId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -146,11 +155,11 @@ export class RidesController {
   async cancelRideByUser(
     @Param('id') id: string,
     @Body() cancelDto: CancelRideDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get user ID from JWT token payload
-    const userId = req.user.id;
-    
+    const userId = principal.id;
+
     const ride = await this.ridesService.cancelRide(id, cancelDto, userId);
     return enveloped(ride, 'Ride cancelled successfully');
   }
@@ -165,15 +174,12 @@ export class RidesController {
   @Get('available')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async getAvailableRides(@Request() req: any) {
+  async getAvailableRides(@CurrentUser() principal: Principal) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const rides = await this.ridesService.findAvailableRides(driverId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -191,10 +197,7 @@ export class RidesController {
   ) {
     assertOwnership(principal, driverId, 'view your own ride history');
     const rides = await this.ridesService.findByDriverId(driverId);
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -210,11 +213,11 @@ export class RidesController {
   async acceptRide(
     @Param('id') id: string,
     @Body() updateDto: UpdateRideStatusDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.acceptRide(id, driverId, updateDto);
     return enveloped(ride, 'Ride accepted successfully');
   }
@@ -228,10 +231,13 @@ export class RidesController {
   @Patch(':id/arrived')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async markArrived(@Param('id') id: string, @Request() req: any) {
+  async markArrived(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.markArrived(id, driverId);
     return enveloped(ride, 'Marked as arrived at pickup location');
   }
@@ -245,10 +251,13 @@ export class RidesController {
   @Patch(':id/start')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async startRide(@Param('id') id: string, @Request() req: any) {
+  async startRide(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.startRide(id, driverId);
     return enveloped(ride, 'Ride started successfully');
   }
@@ -262,10 +271,13 @@ export class RidesController {
   @Patch(':id/complete')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
-  async completeRide(@Param('id') id: string, @Request() req: any) {
+  async completeRide(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.completeRide(id, driverId);
     return enveloped(ride, 'Ride completed successfully');
   }
@@ -284,11 +296,11 @@ export class RidesController {
   async cancelRideByDriver(
     @Param('id') id: string,
     @Body() cancelDto: CancelRideDto,
-    @Request() req: any,
+    @CurrentUser() principal: Principal,
   ) {
     // Get driver ID from JWT token payload
-    const driverId = req.user.id;
-    
+    const driverId = principal.id;
+
     const ride = await this.ridesService.cancelRide(
       id,
       cancelDto,
@@ -310,10 +322,7 @@ export class RidesController {
   @Roles(Role.ADMIN)
   async getAllRides() {
     const rides = await this.ridesService.findAll();
-    return {
-      count: rides.length,
-      rides,
-    };
+    return enveloped(rides, undefined, listMeta(rides));
   }
 
   /**
@@ -327,11 +336,14 @@ export class RidesController {
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Get the revenue split for a ride' })
-  async getFareBreakdown(@Param('id') id: string, @Request() req: any) {
+  async getFareBreakdown(
+    @Param('id') id: string,
+    @CurrentUser() principal: Principal,
+  ) {
     return await this.ridesService.getFareBreakdown(
       id,
-      req.user.id,
-      req.user.role === Role.ADMIN,
+      principal.id,
+      principal.role === Role.ADMIN,
     );
   }
 
@@ -344,10 +356,7 @@ export class RidesController {
   @Get(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
-  async getRide(
-    @Param('id') id: string,
-    @CurrentUser() principal: Principal,
-  ) {
+  async getRide(@Param('id') id: string, @CurrentUser() principal: Principal) {
     const ride = await this.ridesService.findOne(id);
     // findOne eagerly loads ['user', 'driver', 'driver.location', 'vehicle'],
     // so an unchecked read handed any authenticated caller the rider's name,

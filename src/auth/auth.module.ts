@@ -5,12 +5,10 @@ import { UsersModule } from '../users/users.module';
 import { DriversModule } from '../drivers/drivers.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CommonModule } from '../common/common.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { DecaneService } from './decane.service';
 import { AuthResolverService } from './services/auth-resolver.service';
-import { jwtModuleOptions } from '../config/jwt.config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/entities/user.entity';
 import { Driver } from '../drivers/entities/driver.entity';
@@ -26,11 +24,9 @@ import { PrivyAuthService } from './privy/privy-auth.service';
     DriversModule,
     PassportModule, 
     CommonModule, // Use global CommonModule for EmailService
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: jwtModuleOptions,
-    }),
+    // JwtModule comes from TokenModule, which already registers it with the
+    // same factory. Registering it a second time here re-read the secret and
+    // was exactly the duplication the TokenModule extraction removed.
   ],
   controllers: [AuthController],
   providers: [
@@ -45,7 +41,11 @@ import { PrivyAuthService } from './privy/privy-auth.service';
   // resolve socket handshake tokens exactly the way HTTP requests do.
   exports: [
     AuthService,
-    JwtModule,
+    // TokenModule rather than JwtModule directly: a module may only export
+    // what it imports, and JwtModule now arrives via TokenModule. Exporting
+    // TokenModule re-exports JwtModule with it, which is what the websocket
+    // gateway needs for handshake verification.
+    TokenModule,
     DecaneService,
     AuthResolverService,
     PrivyService,

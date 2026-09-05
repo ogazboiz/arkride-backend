@@ -23,7 +23,7 @@ import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { assertPartyToRide } from '../common/utils/ownership.util';
 import type { Principal } from '../common/utils/ownership.util';
-import { enveloped } from '../common/dto/api-response';
+import { enveloped, listMeta } from '../common/dto/api-response';
 
 /**
  * Emergency Controller
@@ -69,7 +69,7 @@ export class EmergencyController {
   @ApiOperation({ summary: 'List emergency incidents' })
   async findAll(@Query('status') status?: EmergencyStatus) {
     const incidents = await this.emergencyService.findAll(status);
-    return { count: incidents.length, incidents };
+    return enveloped(incidents, undefined, listMeta(incidents));
   }
 
   /**
@@ -94,7 +94,7 @@ export class EmergencyController {
     assertPartyToRide(principal, ride, 'view emergency incidents');
 
     const incidents = await this.emergencyService.findByRideId(rideId);
-    return { count: incidents.length, incidents };
+    return enveloped(incidents, undefined, listMeta(incidents));
   }
 
   /**

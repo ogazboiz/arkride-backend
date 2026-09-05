@@ -40,7 +40,7 @@ export class AuthService {
     refreshToken: string,
     context: { userAgent?: string | null; ipAddress?: string | null } = {},
   ) {
-    return this.tokenService.rotate(
+    const session = await this.tokenService.rotate(
       refreshToken,
       async (subjectId, subjectType) => {
         if (subjectType === Role.DRIVER) {
@@ -55,6 +55,12 @@ export class AuthService {
       },
       context,
     );
+
+    // The same `token` alias login and register return. Without it a client
+    // that reads `data.token` works at sign-in and breaks at its first
+    // refresh — which is a worse failure than not having the alias at all,
+    // because it appears an hour later and only for long-lived sessions.
+    return { ...session, token: session.accessToken };
   }
 
   /** End a session. Idempotent — see AuthController.logout for why. */

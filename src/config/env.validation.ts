@@ -172,7 +172,10 @@ export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
  */
 export function collectEnvWarnings(env: NodeJS.ProcessEnv): string[] {
   const warnings: string[] = [];
-  const nodeEnv = env.NODE_ENV ?? 'development';
+  // Not `?? 'development'`. Warnings are advisory, but defaulting here would
+  // silence them for exactly the deployment that most needs them — one that
+  // inherited no NODE_ENV at all.
+  const nodeEnv = env.NODE_ENV;
 
   if (nodeEnv !== 'development' && nodeEnv !== 'test') {
     if (isMissing(env.CORS_ORIGINS)) {

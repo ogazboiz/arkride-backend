@@ -18,6 +18,20 @@ import { Role } from '../../common/enums/role.enum';
 class FakeRefreshTokenRepo {
   rows: RefreshToken[] = [];
 
+  /**
+   * Enough of an EntityManager for `rotate` to enlist in.
+   *
+   * Runs the callback immediately against this same store — which does NOT
+   * model rollback. That limitation is stated on the concurrency test itself,
+   * because a fake that silently pretends to be transactional is worse than no
+   * fake at all.
+   */
+  manager = {
+    transaction: <T>(fn: (m: unknown) => Promise<T>): Promise<T> =>
+      fn({ getRepository: () => this }),
+    getRepository: () => this,
+  };
+
   create(data: Partial<RefreshToken>): RefreshToken {
     return { id: `row-${this.rows.length + 1}`, ...data } as RefreshToken;
   }
@@ -287,6 +301,14 @@ describe('TokenService', () => {
     });
 
     describe('concurrency', () => {
+      // NOTE ON WHAT THIS FAKE CAN AND CANNOT PROVE.
+      //
+      // The production path wraps mint + breach-check in a real transaction,
+      // so a detected breach ROLLS BACK the freshly minted token. This fake
+      // resolves synchronously and does not model rollback, so what the
+      // following cases actually pin is the DECISION LOGIC — who is refused,
+      // and that the family ends up fully revoked — not the isolation
+      // guarantee, which only a real Postgres can demonstrate.
       it('never lets two simultaneous refreshes both succeed', async () => {
         // The TOCTOU this guards: both callers read `revokedAt = null`, both
         // pass the reuse check, both write, and the session FORKS into two

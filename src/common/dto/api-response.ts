@@ -76,3 +76,24 @@ export function enveloped<T>(
 ): Enveloped<T> {
   return new Enveloped(data, message, meta);
 }
+
+/**
+ * Pagination meta for a list that was returned whole.
+ *
+ * Handlers used to hand back `{ count: rides.length, rides }` — a per-endpoint
+ * wrapper that made a client special-case every list. The count belongs in
+ * `meta`, and the list belongs in `data`, so that one client-side unwrap works
+ * everywhere.
+ *
+ * `page`/`limit` describe the single page this is: these endpoints return the
+ * whole result set, so the honest values are page 1 of 1. Endpoints that
+ * genuinely paginate build their own PaginationMeta rather than calling this.
+ */
+export function listMeta(items: readonly unknown[]): PaginationMeta {
+  return {
+    page: 1,
+    limit: items.length,
+    total: items.length,
+    totalPages: 1,
+  };
+}

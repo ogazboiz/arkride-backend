@@ -29,9 +29,9 @@
     "docker:down": "docker compose down",
     "migration:create": "typeorm-ts-node-commonjs migration:create",
     "migration:show": "pnpm run typeorm -- migration:show",
-    "migration:run:prod": "typeorm -d dist/data-source.js migration:run",
-    "migration:revert:prod": "typeorm -d dist/data-source.js migration:revert",
-    "migration:show:prod": "typeorm -d dist/data-source.js migration:show",
+    "migration:run:prod": "npx typeorm -d dist/data-source.js migration:run",
+    "migration:revert:prod": "npx typeorm -d dist/data-source.js migration:revert",
+    "migration:show:prod": "npx typeorm -d dist/data-source.js migration:show",
     "schema:sync:dev": "ts-node scripts/dev/sync-schema.ts",
     "verify:stats": "ts-node scripts/dev/verify-stats.ts",
     "verify:exploits": "node scripts/dev/exploit-suite.mjs"

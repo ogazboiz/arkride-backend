@@ -31,7 +31,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { enveloped } from '../common/dto/api-response';
+import { enveloped, listMeta } from '../common/dto/api-response';
 
 /**
  * Vehicles.
@@ -107,10 +107,7 @@ export class VehiclesController {
   @ApiOkResponse({ description: 'Vehicles fetched successfully.' })
   async findAll() {
     const vehicles = await this.vehiclesService.findAll();
-    return {
-      count: vehicles.length,
-      vehicles,
-    };
+    return enveloped(vehicles, undefined, listMeta(vehicles));
   }
 
   // Move specific routes BEFORE :id route
@@ -126,10 +123,7 @@ export class VehiclesController {
   ) {
     assertOwnership(principal, driverId, 'view your own vehicles');
     const vehicles = await this.vehiclesService.findByDriverId(driverId);
-    return {
-      count: vehicles.length,
-      vehicles,
-    };
+    return enveloped(vehicles, undefined, listMeta(vehicles));
   }
 
   @Get(':id')

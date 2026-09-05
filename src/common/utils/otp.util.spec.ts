@@ -109,3 +109,35 @@ describe('OtpUtil', () => {
     });
   });
 });
+
+describe('OtpUtil.matches — byte-level safety', () => {
+  it('does not throw on multi-byte input, whatever its length', () => {
+    // `padEnd(64).slice(0, 64)` counts UTF-16 code units, so a multi-byte
+    // string produced a buffer longer than 64 and timingSafeEqual threw a
+    // RangeError — which the exception filter turns into a 500. The DTO now
+    // restricts OTPs to digits, but this must not depend on that.
+    for (const value of [
+      '🙂🙂🙂🙂🙂🙂',
+      'é'.repeat(64),
+      '日本語テスト',
+      '🙂'.repeat(500),
+    ]) {
+      expect(() => OtpUtil.matches(value, '123456')).not.toThrow();
+      expect(OtpUtil.matches(value, '123456')).toBe(false);
+    }
+  });
+
+  it('does not throw when the STORED value is multi-byte either', () => {
+    expect(() => OtpUtil.matches('123456', '🙂🙂🙂')).not.toThrow();
+    expect(OtpUtil.matches('123456', '🙂🙂🙂')).toBe(false);
+  });
+
+  it('still matches a normal code after the byte-level rewrite', () => {
+    const code = OtpUtil.generate();
+    expect(OtpUtil.matches(code, code)).toBe(true);
+  });
+
+  it('still rejects a near miss', () => {
+    expect(OtpUtil.matches('123456', '123457')).toBe(false);
+  });
+});

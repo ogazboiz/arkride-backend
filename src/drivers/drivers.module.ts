@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
-import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DriversService } from './drivers.service';
 import { DriversController } from './drivers.controller';
 import { Driver } from './entities/driver.entity';
 import { Vehicle } from '../vehicles/entities/vehicle.entity';
-import { jwtModuleOptions } from '../config/jwt.config';
 import { TokenModule } from '../auth/token.module';
 
 @Module({
@@ -14,11 +12,8 @@ import { TokenModule } from '../auth/token.module';
     TypeOrmModule.forFeature([Driver, Vehicle]),
     // Drivers issue the same access + refresh sessions riders do.
     TokenModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: jwtModuleOptions,
-    }),
+    // JwtModule arrives with TokenModule — see AuthModule for why it is not
+    // registered a second time here.
   ],
   controllers: [DriversController],
   providers: [DriversService],

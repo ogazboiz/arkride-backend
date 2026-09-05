@@ -60,7 +60,6 @@ describe('AuthController', () => {
           identityToken: 'privy-identity',
           audience: PrivyAudienceDto.RIDER,
           name: 'Amina',
-          email: 'amina@example.com',
         },
         request({ 'user-agent': 'ArkRides/1.0' }),
       );
@@ -70,10 +69,37 @@ describe('AuthController', () => {
         identityToken: 'privy-identity',
         audience: 'rider',
         name: 'Amina',
-        email: 'amina@example.com',
         userAgent: 'ArkRides/1.0',
         ipAddress: '1.2.3.4',
       });
+    });
+
+    it('does NOT forward an email, even one smuggled past the DTO', async () => {
+      // The account takeover: the address used to link a Privy DID to an
+      // existing account came from this body, so anyone with their own valid
+      // Privy token could name a victim's address and be handed their account.
+      //
+      // `email` is gone from PrivySignInDto and from PrivySignInInput. This
+      // pins the CONTROLLER's half of that — it enumerates fields rather than
+      // spreading `dto`, so a stray property cannot ride through even if
+      // validation were somehow bypassed.
+      mockPrivyAuthService.signIn.mockResolvedValue({});
+
+      await controller.privySignIn(
+        {
+          accessToken: 'privy-access',
+          audience: PrivyAudienceDto.RIDER,
+          email: 'victim@example.com',
+        } as never,
+        request(),
+      );
+
+      const forwarded = mockPrivyAuthService.signIn.mock.calls[0][0] as Record<
+        string,
+        unknown
+      >;
+      expect(forwarded).not.toHaveProperty('email');
+      expect(JSON.stringify(forwarded)).not.toContain('victim@example.com');
     });
 
     it('falls back to the privy-id-token header when the body omits it', async () => {

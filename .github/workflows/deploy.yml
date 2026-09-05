@@ -77,7 +77,7 @@ jobs:
 
             IMAGE_TAG=$IMAGE_TAG docker compose up -d
 
-            docker compose exec -T api pnpm run migration:run:prod
+            docker compose exec -T api npx typeorm -d dist/data-source.js migration:run
 
       - name: Deploy to Digital Ocean (Main)
         if: github.ref == 'refs/heads/main'
@@ -108,4 +108,4 @@ jobs:
 
             IMAGE_TAG=$IMAGE_TAG docker compose up -d
 
-            docker compose exec -T api pnpm run migration:run:prod
+            docker compose exec -T api npx typeorm -d dist/data-source.js migration:run

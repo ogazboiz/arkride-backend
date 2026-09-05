@@ -13,14 +13,27 @@ import { randomInt, timingSafeEqual } from 'node:crypto';
  *    guessable by hand inside the ten-minute window.
  *  - No attempt counter and no lockout, so nothing made guessing expensive.
  *
- * Now: `crypto.randomInt` (rejection-sampled, uniform), six digits, a constant
- * -time comparison, and an attempt budget the caller enforces per account.
+ * Now: `crypto.randomInt` (rejection-sampled, uniform), six digits, and a
+ * constant-time comparison. An attempt budget is defined below but is NOT yet
+ * enforced — see MAX_ATTEMPTS for what actually bounds guessing today.
  */
 export class OtpUtil {
   /** Digits in a generated code. Six -> 900,000 values. */
   static readonly LENGTH = 6;
 
-  /** Wrong guesses allowed against one issued code before it is burnt. */
+  /**
+   * Wrong guesses allowed against one issued code before it is burnt.
+   *
+   * NOT ENFORCED YET — deliberately left here, and deliberately said out loud.
+   * Enforcing it needs an attempt counter on the users and drivers rows and a
+   * migration to add it, which is a schema change this branch is not making.
+   *
+   * What currently bounds guessing is the throttler: credential endpoints are
+   * clamped to 5 requests a minute per IP (SecurityModule), against a
+   * six-digit space and a ten-minute validity window. That is a real bound,
+   * but it is per IP rather than per account, so it does not stop a
+   * distributed attempt.
+   */
   static readonly MAX_ATTEMPTS = 5;
 
   /**
@@ -63,11 +76,28 @@ export class OtpUtil {
   ): boolean {
     if (!submitted || !stored) return false;
 
-    const a = Buffer.from(submitted.padEnd(64, '\0').slice(0, 64), 'utf8');
-    const b = Buffer.from(stored.padEnd(64, '\0').slice(0, 64), 'utf8');
+    // Pad the BYTES, not the characters.
+    //
+    // `str.padEnd(64).slice(0, 64)` counts UTF-16 code units, so a multi-byte
+    // submission produces a buffer longer than 64 — and `timingSafeEqual`
+    // THROWS on a length mismatch, which the exception filter would turn into
+    // a 500. The DTO now constrains OTPs to digits, but this must not depend
+    // on a validator somewhere else staying correct.
+    const a = OtpUtil.fixedWidth(submitted);
+    const b = OtpUtil.fixedWidth(stored);
 
-    // The length check is folded into the compared bytes above, so this is a
-    // single constant-time operation over a fixed width.
+    // Length is folded into the compared bytes, so this is one constant-time
+    // operation over a fixed width; the explicit length check afterwards costs
+    // nothing extra because both values are already known.
     return timingSafeEqual(a, b) && submitted.length === stored.length;
+  }
+
+  /** A 64-byte buffer holding (a truncation of) `value`, zero-padded. */
+  private static fixedWidth(value: string): Buffer {
+    const buffer = Buffer.alloc(64);
+    // `write` truncates at the buffer's capacity and never overflows it, so an
+    // arbitrarily long or multi-byte input is safe here.
+    buffer.write(value, 'utf8');
+    return buffer;
   }
 }

@@ -1,6 +1,6 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, IsNull } from 'typeorm';
+import { Repository, LessThan, IsNull, EntityManager } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes, createHash, randomUUID } from 'node:crypto';
 import { RefreshToken } from '../entities/refresh-token.entity';
@@ -145,29 +145,54 @@ export class TokenService {
       throw new UnauthorizedException('Invalid or expired session.');
     }
 
-    const session = await this.mint(subject, stored.familyId, context);
-
-    // One more check, and it is not paranoia.
+    // MINT AND VERIFY IN ONE TRANSACTION.
     //
     // The atomic claim above decides who consumes the old token, but the LOSER
     // of a race revokes the family a moment later — and by then we may already
-    // have minted. Without this, the winner walks away with a live session
-    // from a family that has been declared compromised. If the winner is the
-    // thief, the victim is locked out and the thief is not.
+    // have minted. Doing the mint and the breach check as two separate
+    // statements leaves a window where the winner's new token is written,
+    // observed as clean, and only revoked afterwards.
     //
-    // A compromised family means nobody keeps the session. Both parties
-    // re-authenticate; that is the correct answer to "one of you is not who
-    // you say you are, and we cannot tell which".
-    const breached = await this.refreshTokens.findOne({
-      where: { familyId: stored.familyId, revokedReason: 'reuse-detected' },
-    });
+    // Inside a transaction the check runs against the same snapshot the insert
+    // belongs to, and a breach rolls the insert back rather than racing it. A
+    // compromised family means NOBODY keeps the session — that is the correct
+    // answer to "one of you is not who you say you are and we cannot tell
+    // which", and it is deliberately not "whoever was faster wins", which
+    // would hand the session to the thief exactly as often as to the victim.
+    //
+    // RESIDUAL, stated because it cannot be designed away here: the ACCESS
+    // token minted in this call is a stateless JWT and stays valid until it
+    // expires. Nothing short of a denylist can recall it. Its one-hour TTL
+    // (config/jwt.config.ts) is the bound on that exposure, and shortening
+    // that TTL was the reason this table exists at all.
+    return this.refreshTokens.manager
+      .transaction(async (manager) => {
+        const session = await this.mint(
+          subject,
+          stored.familyId,
+          context,
+          manager,
+        );
 
-    if (breached) {
-      await this.revokeFamily(stored.familyId, 'reuse-detected');
-      throw new UnauthorizedException('Invalid or expired session.');
-    }
+        const breached = await manager.getRepository(RefreshToken).findOne({
+          where: { familyId: stored.familyId, revokedReason: 'reuse-detected' },
+        });
 
-    return session;
+        if (breached) {
+          // Roll the freshly minted token back, then revoke outside this
+          // transaction so the revocation survives the rollback.
+          throw new SessionCompromisedError(stored.familyId);
+        }
+
+        return session;
+      })
+      .catch(async (error: unknown) => {
+        if (error instanceof SessionCompromisedError) {
+          await this.revokeFamily(error.familyId, 'reuse-detected');
+          throw new UnauthorizedException('Invalid or expired session.');
+        }
+        throw error;
+      });
   }
 
   /**
@@ -254,6 +279,8 @@ export class TokenService {
     subject: SessionSubject,
     familyId: string,
     context: { userAgent?: string | null; ipAddress?: string | null },
+    /** Enlist in the caller's transaction when there is one. */
+    manager?: EntityManager,
   ): Promise<SessionTokens> {
     // The payload shape is unchanged — AuthResolverService and the websocket
     // gateway both branch on `type === 'driver'` plus `role`, and this is not
@@ -266,8 +293,12 @@ export class TokenService {
 
     const refreshToken = randomBytes(32).toString('base64url');
 
-    await this.refreshTokens.save(
-      this.refreshTokens.create({
+    const repo = manager
+      ? manager.getRepository(RefreshToken)
+      : this.refreshTokens;
+
+    await repo.save(
+      repo.create({
         tokenHash: hashToken(refreshToken),
         familyId,
         subjectId: subject.id,
@@ -298,4 +329,18 @@ export class TokenService {
  */
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/**
+ * Internal signal that a rotation must be rolled back and the family revoked.
+ *
+ * A thrown error is what makes the transaction abort, and a dedicated type is
+ * what lets the caller tell "this family is compromised" apart from a database
+ * failure — which must NOT be answered by revoking anyone's session.
+ */
+class SessionCompromisedError extends Error {
+  constructor(readonly familyId: string) {
+    super('Refresh token family compromised');
+    this.name = 'SessionCompromisedError';
+  }
 }

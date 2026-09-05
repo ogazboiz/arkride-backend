@@ -13,7 +13,7 @@ import {
   ParseUUIDPipe,
   ForbiddenException,
 } from '@nestjs/common';
-import { enveloped } from '../common/dto/api-response';
+import { enveloped, listMeta } from '../common/dto/api-response';
 import { DriverLocationsService } from './driver-locations.service';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -280,15 +280,15 @@ export class DriverLocationsController {
       searchRadius,
     );
 
-    return {
-      searchLocation: {
-        lat,
-        lng,
+    return enveloped(
+      {
+        searchLocation: { lat, lng },
+        radius: searchRadius,
+        drivers,
       },
-      radius: searchRadius,
-      count: drivers.length,
-      drivers,
-    };
+      'Nearby drivers fetched',
+      listMeta(drivers),
+    );
   }
 }
 
