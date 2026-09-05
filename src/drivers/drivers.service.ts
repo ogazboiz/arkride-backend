@@ -15,6 +15,7 @@ import { UpdateDriverDto } from './dto/update-driver.dto';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import { EmailService } from '../common/services/email.service';
+import { TokenService } from '../auth/services/token.service';
 import { OtpUtil } from '../common/utils/otp.util';
 import { Role } from '../common/enums/role.enum';
 
@@ -29,6 +30,7 @@ export class DriversService {
     private readonly vehicleRepository: Repository<Vehicle>,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly tokenService: TokenService,
   ) { }
 
   async create(createDriverDto: CreateDriverDto) {
@@ -114,11 +116,11 @@ export class DriversService {
     await this.vehicleRepository.save(vehicle);
 
     // Generate token for immediate login
-    const token = this.generateToken(driver);
+    const session = await this.issueSession(driver);
 
     return {
       driver: this.sanitizeDriver(driver),
-      token,
+      ...session,
     };
   }
 
@@ -156,12 +158,12 @@ export class DriversService {
       throw new UnauthorizedException('Your account has been deactivated');
     }
 
-    const token = this.generateToken(driver);
+    const session = await this.issueSession(driver);
 
     return {
       message: 'Login successful',
       driver: this.sanitizeDriver(driver),
-      token,
+      ...session,
     };
   }
 
@@ -326,6 +328,11 @@ export class DriversService {
 
     const updatedDriver = await this.driversRepository.save(driver);
 
+    // Losing approval ends the session too — the same reasoning as suspension.
+    if (status !== VerificationStatus.APPROVED) {
+      await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
+    }
+
     this.logger.log({
       message: 'Driver verification status changed',
       driverId: driver.id,
@@ -356,6 +363,14 @@ export class DriversService {
 
     const updatedDriver = await this.driversRepository.save(driver);
 
+    // Suspension has to END THE SESSION, not just set a flag. Access tokens
+    // last an hour and refresh tokens thirty days, so without this a suspended
+    // driver kept working for up to a month. TokenService.revokeAllForSubject
+    // existed for exactly this and had no caller.
+    if (!isActive) {
+      await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
+    }
+
     this.logger.log({
       message: isActive ? 'Driver reinstated' : 'Driver suspended',
       driverId: driver.id,
@@ -372,6 +387,10 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
+    // Sessions first: there is no foreign key from refresh_tokens.subjectId,
+    // so deleting the driver would otherwise leave live tokens pointing at a
+    // row that no longer exists.
+    await this.tokenService.revokeAllForSubject(driver.id, Role.DRIVER);
     await this.driversRepository.remove(driver);
   }
 
@@ -427,7 +446,8 @@ export class DriversService {
       throw new NotFoundException('Driver not found');
     }
 
-    if (!driver.otpCode || driver.otpCode !== dto.otp) {
+    // Constant-time — see OtpUtil.matches.
+    if (!OtpUtil.matches(dto.otp, driver.otpCode)) {
       throw new BadRequestException('Invalid OTP');
     }
 
@@ -469,16 +489,23 @@ export class DriversService {
     });
   }
 
-  private generateToken(driver: Driver): string {
-    const payload = {
-      sub: driver.id,
-      email: driver.email,
-      role: driver.role || Role.DRIVER,
-      type: 'driver'
-    };
-    console.log('Signing driver JWT payload:', payload);
-
-    return this.jwtService.sign(payload);
+  /**
+   * Issue a full session for a driver. See AuthService.issueSession for why a
+   * bare signed token is no longer enough.
+   *
+   * The `console.log('Signing driver JWT payload:', payload)` that used to sit
+   * here printed the driver's id, email and role to stdout on every single
+   * login. It is gone.
+   */
+  private async issueSession(
+    driver: Driver,
+    context: { userAgent?: string | null; ipAddress?: string | null } = {},
+  ) {
+    const session = await this.tokenService.issueSession(
+      { id: driver.id, role: driver.role || Role.DRIVER, isDriver: true },
+      context,
+    );
+    return { ...session, token: session.accessToken };
   }
 
   private sanitizeDriver(driver: Driver) {

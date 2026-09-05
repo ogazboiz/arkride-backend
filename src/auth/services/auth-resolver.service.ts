@@ -36,34 +36,91 @@ export class AuthResolverService {
     private readonly driversService: DriversService,
   ) {}
 
+  /**
+   * Resolve a verified token into the principal it names.
+   *
+   * TWO RULES, both of which were broken:
+   *
+   * 1. The ROLE COMES FROM THE DATABASE, never from the token.
+   *
+   *    This used to `return { ...user, role: Role.ADMIN }` whenever the
+   *    payload said `role: 'admin'`, without ever checking `user.role`. So
+   *    demoting an admin in the database did nothing until their access token
+   *    expired — for a full hour they kept `GET /stats/revenue`,
+   *    `GET /ledger/summary` and `PATCH /drivers/:id/verification-status`.
+   *    Re-reading the subject on refresh (AuthService.refreshSession) is
+   *    pointless if the access-token path, which is the one that actually
+   *    authorizes requests, trusts a claim instead.
+   *
+   *    The token still says which TABLE to look in — riders and drivers have
+   *    separate id spaces, so that part is genuinely needed and is not a
+   *    privilege claim.
+   *
+   * 2. CREDENTIALS DO NOT GO ON `req.user`.
+   *
+   *    `usersService.findById` returns the whole entity with no projection, so
+   *    `{ ...user }` put the bcrypt hash plus `otpCode` / `otpExpiry` on the
+   *    request object for every authenticated call. Nothing returns `req.user`
+   *    today — but `@CurrentUser()` hands that object to every controller, and
+   *    one `return principal` is all it would take.
+   */
   async resolvePrincipal(payload: any): Promise<ResolvedPrincipal> {
-    const { sub, role } = payload ?? {};
+    const { sub } = payload ?? {};
 
     if (!sub) {
       throw new UnauthorizedException('Token is missing a subject');
     }
 
-    // Drivers are a separate identity table, flagged by `type` on the payload
-    if (payload.type === 'driver' && role === Role.DRIVER) {
+    // `type` selects the identity TABLE. It is not a permission.
+    if (payload?.type === 'driver') {
       const driver = await this.driversService.findForAuth(sub);
       if (!driver) {
         throw new UnauthorizedException('Invalid driver token');
       }
-      return { ...driver, role: Role.DRIVER };
-    }
-
-    if (role === Role.ADMIN) {
-      const user = await this.usersService.findById(sub);
-      if (!user) {
-        throw new UnauthorizedException('Admin user not found');
-      }
-      return { ...user, role: Role.ADMIN };
+      // No isActive check here: `findForAuth` queries
+      // `where: { id, isActive: true }`, so a deactivated driver already
+      // resolves to null above. Repeating it would be dead code that only
+      // misfires when the field is absent.
+      return {
+        ...stripCredentials(driver),
+        // From the row, not the token.
+        role: driver.role ?? Role.DRIVER,
+      };
     }
 
     const user = await this.usersService.findById(sub);
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
-    return { ...user, role: Role.USER };
+    if (user.isBlocked) {
+      // The drivers branch already refused deactivated drivers; riders had no
+      // equivalent check, so a blocked rider kept full access for the life of
+      // their token.
+      throw new UnauthorizedException('This account has been blocked');
+    }
+
+    return {
+      ...stripCredentials(user),
+      role: user.role ?? Role.USER,
+    };
   }
+}
+
+/**
+ * Remove everything secret before an entity becomes `req.user`.
+ *
+ * Deliberately a denylist of the credential columns rather than an allowlist
+ * of safe ones: controllers already read assorted fields off the principal,
+ * and an allowlist would break them silently. The three names here are the
+ * only secrets either table holds, and a new one would have to be added
+ * consciously — which is the right amount of friction for adding a secret.
+ *
+ * Exported for the unit test.
+ */
+export function stripCredentials<T extends object>(
+  entity: T,
+): Omit<T, 'password' | 'otpCode' | 'otpExpiry'> {
+  const { password, otpCode, otpExpiry, ...safe } = entity as T &
+    Partial<Record<'password' | 'otpCode' | 'otpExpiry', unknown>>;
+  return safe as Omit<T, 'password' | 'otpCode' | 'otpExpiry'>;
 }

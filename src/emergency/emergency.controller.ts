@@ -23,6 +23,7 @@ import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { assertPartyToRide } from '../common/utils/ownership.util';
 import type { Principal } from '../common/utils/ownership.util';
+import { enveloped } from '../common/dto/api-response';
 
 /**
  * Emergency Controller
@@ -55,10 +56,7 @@ export class EmergencyController {
       req.user.role,
     );
 
-    return {
-      message: 'Emergency protocol triggered. Help is being notified.',
-      incident,
-    };
+    return enveloped(incident, 'Emergency protocol triggered. Help is being notified.');
   }
 
   /**
@@ -109,6 +107,6 @@ export class EmergencyController {
   @ApiOperation({ summary: 'Close out an emergency incident' })
   async resolve(@Param('id') id: string, @Body() dto: ResolveEmergencyDto) {
     const incident = await this.emergencyService.resolve(id, dto);
-    return { message: 'Incident updated', incident };
+    return enveloped(incident, 'Incident updated');
   }
 }

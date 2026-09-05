@@ -164,3 +164,36 @@ describe('stats helpers', () => {
     });
   });
 });
+
+describe('roundDownToMilestone', () => {
+  const { roundDownToMilestone } = require('./stats.service');
+
+  it('leaves small numbers alone — rounding 7 to 0 would be its own lie', () => {
+    expect(roundDownToMilestone(0)).toBe(0);
+    expect(roundDownToMilestone(7)).toBe(7);
+    expect(roundDownToMilestone(99)).toBe(99);
+  });
+
+  it('rounds hundreds down to the hundred', () => {
+    expect(roundDownToMilestone(247)).toBe(200);
+    expect(roundDownToMilestone(999)).toBe(900);
+  });
+
+  it('rounds thousands down to the thousand', () => {
+    // The point: 1,247 is a pollable business metric; 1,000 is a marketing
+    // number that gives a competitor no growth curve.
+    expect(roundDownToMilestone(1247)).toBe(1000);
+    expect(roundDownToMilestone(9999)).toBe(9000);
+  });
+
+  it('rounds larger numbers down to ten thousands', () => {
+    expect(roundDownToMilestone(41_872)).toBe(40_000);
+    expect(roundDownToMilestone(1_234_567)).toBe(1_230_000);
+  });
+
+  it('never rounds UP — the figure must stay defensible', () => {
+    for (const n of [99, 100, 101, 999, 1000, 1001, 9999, 10_000, 12_345]) {
+      expect(roundDownToMilestone(n)).toBeLessThanOrEqual(n);
+    }
+  });
+});

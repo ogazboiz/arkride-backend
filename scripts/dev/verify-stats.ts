@@ -220,10 +220,12 @@ async function main(): Promise<void> {
   check('completedRides', pub.completedRides, 2);
   check('activeDrivers (approved only)', pub.activeDrivers, 1);
   check('riders', pub.riders, 2);
-  check('topPickupLocations', pub.topPickupLocations, [
-    { address: 'Allen Avenue, Ikeja', rides: 4 },
-    { address: 'Herbert Macaulay Way, Yaba', rides: 1 },
-  ]);
+  // /stats/public deliberately no longer returns pickup ADDRESSES — on modest
+  // volume those are individual riders' homes. Only the count of distinct
+  // areas served is public.
+  check('coverageAreas (count, not addresses)', pub.coverageAreas, 2);
+  check('no addresses in the public payload',
+    JSON.stringify(pub).includes('Allen Avenue'), false);
 
   console.log('\n--- getDashboard');
   const dash = await service.getDashboard();

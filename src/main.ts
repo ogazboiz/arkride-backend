@@ -9,6 +9,7 @@ import { validateEnvironment } from './config/env.validation';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseEnvelopeInterceptor } from './common/interceptors/response-envelope.interceptor';
 import { corsOptions } from './config/cors.config';
+import { isDevelopment } from './config/environment';
 
 async function bootstrap() {
   // Before anything is constructed. A missing JWT_SECRET used to degrade into
@@ -84,10 +85,9 @@ async function bootstrap() {
   // Swagger used to be mounted unconditionally, unauthenticated, in every
   // environment — a full map of the API surface handed to anyone who asked.
   // Opt-in outside local development.
+  // Fails CLOSED: an unset NODE_ENV is NOT development. See config/environment.
   const swaggerEnabled =
-    process.env.NODE_ENV === 'development' ||
-    process.env.NODE_ENV === undefined ||
-    process.env.ENABLE_SWAGGER === 'true';
+    isDevelopment() || process.env.ENABLE_SWAGGER === 'true';
 
   if (swaggerEnabled) {
     const documentFactory = () => SwaggerModule.createDocument(app, config);

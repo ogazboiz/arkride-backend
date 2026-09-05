@@ -43,7 +43,11 @@ describe('PrivyAuthService', () => {
   let service: PrivyAuthService;
   let users: ReturnType<typeof fakeRepo<any>>;
   let drivers: ReturnType<typeof fakeRepo<any>>;
-  let privy: { isConfigured: boolean; verifyAccessToken: jest.Mock; walletFromIdentityToken: jest.Mock };
+  let privy: {
+    isConfigured: boolean;
+    verifyAccessToken: jest.Mock;
+    identityFrom: jest.Mock;
+  };
   let tokens: { issueSession: jest.Mock };
 
   async function build(
@@ -55,7 +59,9 @@ describe('PrivyAuthService', () => {
     privy = {
       isConfigured: true,
       verifyAccessToken: jest.fn().mockResolvedValue(DID),
-      walletFromIdentityToken: jest.fn().mockResolvedValue(null),
+      // The verified identity. Email and wallet BOTH come from here now —
+      // never from the request body. See the takeover note in the service.
+      identityFrom: jest.fn().mockResolvedValue({ wallet: null, email: null }),
     };
     tokens = {
       issueSession: jest.fn().mockResolvedValue({
@@ -78,6 +84,16 @@ describe('PrivyAuthService', () => {
 
     service = moduleRef.get(PrivyAuthService);
   }
+
+  /** Make the VERIFIED identity token carry this email. */
+  const withVerifiedEmail = (email: string): void => {
+    privy.identityFrom.mockResolvedValue({ wallet: null, email });
+  };
+
+  /** Make the VERIFIED identity token carry this wallet. */
+  const withVerifiedWallet = (wallet: string | null): void => {
+    privy.identityFrom.mockResolvedValue({ wallet, email: null });
+  };
 
   const riderSignIn = (over: Record<string, unknown> = {}) =>
     service.signIn({ accessToken: 'tok', audience: 'rider', ...over } as any);
@@ -108,7 +124,8 @@ describe('PrivyAuthService', () => {
 
   describe('riders are provisioned on first sign-in', () => {
     it('creates a rider for an unknown DID', async () => {
-      const result = await riderSignIn({ name: 'Amina', email: 'Amina@Example.com' });
+      withVerifiedEmail('amina@example.com');
+      const result = await riderSignIn({ name: 'Amina' });
 
       expect(result.isNewAccount).toBe(true);
       expect(users.create).toHaveBeenCalledWith(
@@ -166,7 +183,8 @@ describe('PrivyAuthService', () => {
       await build([
         { id: 'user-1', privyDid: null, name: 'Amina', email: 'a@b.com', isBlocked: false },
       ]);
-      const result = await riderSignIn({ email: 'a@b.com' });
+      withVerifiedEmail('a@b.com');
+      const result = await riderSignIn();
 
       expect(result.isNewAccount).toBe(false);
       expect(result.profile.id).toBe('user-1');
@@ -178,29 +196,52 @@ describe('PrivyAuthService', () => {
       await build([
         { id: 'user-1', privyDid: OTHER_DID, name: 'A', email: 'a@b.com', isBlocked: false },
       ]);
-      await expect(riderSignIn({ email: 'a@b.com' })).rejects.toThrow(
-        ForbiddenException,
-      );
+      withVerifiedEmail('a@b.com');
+      await expect(riderSignIn()).rejects.toThrow(ForbiddenException);
       expect(users.rows[0].privyDid).toBe(OTHER_DID);
     });
 
-    it('matches the email case-insensitively', async () => {
+    it('IGNORES an email supplied in the request body', async () => {
+      // The takeover. A caller with their own valid Privy token used to be
+      // able to name a victim's address here and be handed their account.
+      // The body has no email field any more, and even a stray one must not
+      // reach the lookup.
+      await build([
+        { id: 'victim', privyDid: null, name: 'Victim', email: 'victim@b.com', isBlocked: false },
+      ]);
+      // Privy's verified token says nothing about this address.
+      privy.identityFrom.mockResolvedValue({ wallet: null, email: null });
+
+      const result = await service.signIn({
+        accessToken: 'tok',
+        audience: 'rider',
+        // Deliberately smuggled past the DTO, as a raw body would.
+        email: 'victim@b.com',
+      } as any);
+
+      expect(result.profile.id).not.toBe('victim');
+      expect(result.isNewAccount).toBe(true);
+      expect(users.rows.find((r: any) => r.id === 'victim').privyDid).toBeNull();
+    });
+
+    it('links only on the email the VERIFIED token attests to', async () => {
       await build([
         { id: 'user-1', privyDid: null, name: 'A', email: 'a@b.com', isBlocked: false },
       ]);
-      await riderSignIn({ email: 'A@B.COM' });
+      withVerifiedEmail('a@b.com');
+      await riderSignIn();
       expect(users.rows[0].privyDid).toBe(DID);
     });
   });
 
   describe('wallet capture', () => {
     it('records the embedded wallet from the identity token', async () => {
-      privy.walletFromIdentityToken.mockResolvedValue(WALLET);
+      withVerifiedWallet(WALLET);
       const result = await riderSignIn({ identityToken: 'id-tok' });
       expect(result.profile.walletAddressEvm).toBe(WALLET);
     });
 
-    it('signs in fine when no identity token is supplied', async () => {
+    it('signs in fine when the token carries no identity at all', async () => {
       // A missing or stale identity token must never block sign-in — it only
       // means we do not learn the wallet this time.
       const result = await riderSignIn();
@@ -219,7 +260,7 @@ describe('PrivyAuthService', () => {
           walletAddressEvm: '0x1111111111111111111111111111111111111111',
         },
       ]);
-      privy.walletFromIdentityToken.mockResolvedValue(WALLET);
+      withVerifiedWallet(WALLET);
       await riderSignIn({ identityToken: 'id-tok' });
       expect(users.rows[0].walletAddressEvm).toBe(WALLET);
     });
@@ -237,7 +278,7 @@ describe('PrivyAuthService', () => {
           walletAddressEvm: WALLET,
         },
       ]);
-      privy.walletFromIdentityToken.mockResolvedValue(null);
+      withVerifiedWallet(null);
       await riderSignIn();
       expect(users.rows[0].walletAddressEvm).toBe(WALLET);
     });
@@ -281,7 +322,8 @@ describe('PrivyAuthService', () => {
           verificationStatus: 'pending',
         },
       ]);
-      await driverSignIn({ email: 'y@b.com' });
+      withVerifiedEmail('y@b.com');
+      await driverSignIn();
       expect(drivers.rows[0].privyDid).toBe(DID);
     });
 

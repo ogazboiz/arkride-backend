@@ -129,7 +129,6 @@ export class AuthController {
         dto.identityToken ?? req.header(PRIVY_IDENTITY_HEADER) ?? null,
       audience: dto.audience,
       name: dto.name,
-      email: dto.email,
       userAgent: req.header('user-agent') ?? null,
       ipAddress: req.ip ?? null,
     });

@@ -82,17 +82,26 @@ export class TokenService {
       throw new UnauthorizedException('Invalid or expired session.');
     }
 
-    // REUSE DETECTION. A consumed token being presented again means two
-    // parties hold it. There is no way to tell the thief from the owner, so
-    // the entire family goes.
     if (stored.revokedAt) {
-      this.logger.warn({
-        message: 'Refresh token reuse detected — revoking the whole session family',
-        familyId: stored.familyId,
-        subjectId: stored.subjectId,
-        originallyRevokedFor: stored.revokedReason,
-      });
-      await this.revokeFamily(stored.familyId, 'reuse-detected');
+      // REUSE DETECTION, but only for a token that was CONSUMED BY A ROTATION.
+      //
+      // That is the case that means two parties hold one token: it was
+      // exchanged once and is being exchanged again. There is no way to tell
+      // the thief from the owner, so the entire family goes.
+      //
+      // A token revoked by an explicit logout, or by an admin, is a different
+      // thing entirely — the session is already deliberately dead, and a
+      // client retrying after a dropped logout response is not an attack.
+      // Treating that as a breach would also overwrite the audit reason, so a
+      // logout would end up recorded as a compromise.
+      if (stored.revokedReason === 'rotated') {
+        this.logger.warn({
+          message: 'Refresh token reuse detected — revoking the whole session family',
+          familyId: stored.familyId,
+          subjectId: stored.subjectId,
+        });
+        await this.revokeFamily(stored.familyId, 'reuse-detected');
+      }
       throw new UnauthorizedException('Invalid or expired session.');
     }
 
@@ -100,21 +109,68 @@ export class TokenService {
       throw new UnauthorizedException('Invalid or expired session.');
     }
 
-    // Re-read the subject on every refresh. This is what makes a suspension
-    // take effect within the access-token lifetime rather than at the end of
-    // a 30-day refresh window.
+    // CONSUME IT FIRST, and let the database decide who won.
+    //
+    // The read above is only a hint. Checking `revokedAt` in JavaScript and
+    // then updating is a TOCTOU: two concurrent refreshes with the same token
+    // both read `revokedAt = null`, both pass the check, both write, and both
+    // mint — leaving two live tokens in one family with reuse detection never
+    // firing. That is precisely the fork this class exists to prevent, and it
+    // is reachable by a thief simply firing their refresh at the same moment
+    // as the victim's.
+    //
+    // `WHERE revokedAt IS NULL` makes the claim atomic. Exactly one caller can
+    // get `affected === 1`; everyone else gets 0 and is treated as reuse.
+    const claimed = await this.refreshTokens.update(
+      { id: stored.id, revokedAt: IsNull() },
+      { revokedAt: new Date(), revokedReason: 'rotated' },
+    );
+
+    if (!claimed.affected) {
+      // Someone else consumed it between our read and our write. Same
+      // conclusion as a replay: two parties hold this token.
+      this.logger.warn({
+        message: 'Refresh token consumed concurrently — revoking the family',
+        familyId: stored.familyId,
+        subjectId: stored.subjectId,
+      });
+      await this.revokeFamily(stored.familyId, 'reuse-detected');
+      throw new UnauthorizedException('Invalid or expired session.');
+    }
+
+    // Re-read the subject AFTER the claim. This is what makes a suspension
+    // take effect within the access-token lifetime rather than at the end of a
+    // 30-day refresh window — and doing it after the claim means a token is
+    // never left spendable when the subject turns out to be gone.
     const subject = await resolveSubject(stored.subjectId, stored.subjectType);
     if (!subject) {
       await this.revokeFamily(stored.familyId, 'subject-unavailable');
       throw new UnauthorizedException('Invalid or expired session.');
     }
 
-    await this.refreshTokens.update(stored.id, {
-      revokedAt: new Date(),
-      revokedReason: 'rotated',
+    const session = await this.mint(subject, stored.familyId, context);
+
+    // One more check, and it is not paranoia.
+    //
+    // The atomic claim above decides who consumes the old token, but the LOSER
+    // of a race revokes the family a moment later — and by then we may already
+    // have minted. Without this, the winner walks away with a live session
+    // from a family that has been declared compromised. If the winner is the
+    // thief, the victim is locked out and the thief is not.
+    //
+    // A compromised family means nobody keeps the session. Both parties
+    // re-authenticate; that is the correct answer to "one of you is not who
+    // you say you are, and we cannot tell which".
+    const breached = await this.refreshTokens.findOne({
+      where: { familyId: stored.familyId, revokedReason: 'reuse-detected' },
     });
 
-    return this.mint(subject, stored.familyId, context);
+    if (breached) {
+      await this.revokeFamily(stored.familyId, 'reuse-detected');
+      throw new UnauthorizedException('Invalid or expired session.');
+    }
+
+    return session;
   }
 
   /**
@@ -140,12 +196,30 @@ export class TokenService {
     );
   }
 
-  /** Revoke every live token in a family. */
+  /**
+   * Revoke every live token in a family.
+   *
+   * A REUSE-DETECTED revocation additionally re-stamps rows that were already
+   * revoked. That looks redundant and is not: when a race is lost, the winner
+   * has usually already consumed the only live row as 'rotated', so there is
+   * nothing left for the first UPDATE to touch and the family carries no
+   * evidence of the breach at all. The winner's post-mint integrity check
+   * looks for exactly that evidence, so without this the compromised session
+   * survives.
+   *
+   * A breach is also simply the more important fact about a token than the
+   * fact that it was rotated, so overwriting the reason is right on its own
+   * terms for the audit trail.
+   */
   private async revokeFamily(familyId: string, reason: string): Promise<void> {
     await this.refreshTokens.update(
       { familyId, revokedAt: IsNull() },
       { revokedAt: new Date(), revokedReason: reason },
     );
+
+    if (reason === 'reuse-detected') {
+      await this.refreshTokens.update({ familyId }, { revokedReason: reason });
+    }
   }
 
   /**
@@ -158,9 +232,19 @@ export class TokenService {
    */
   async pruneExpired(graceDays = 7): Promise<number> {
     const cutoff = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000);
+
+    // Note there is NO `revokedAt: Not(IsNull())` condition here.
+    //
+    // It used to be there, and it meant a token that simply EXPIRED without
+    // ever being used or revoked was never deleted at all — which is most of
+    // them, on a service where people stop opening the app. The table grew
+    // without bound and took the tokenHash unique index with it.
+    //
+    // Expiry past the grace period is sufficient on its own: such a token
+    // cannot be exchanged, and it is far enough past the reuse-detection
+    // window that keeping it proves nothing.
     const result = await this.refreshTokens.delete({
       expiresAt: LessThan(cutoff),
-      revokedAt: Not(IsNull()),
     });
     return result.affected ?? 0;
   }

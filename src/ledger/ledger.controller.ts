@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   UseGuards,
 } from '@nestjs/common';
+import { clampLimit, clampOffset } from '../common/utils/pagination.util';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LedgerService } from './ledger.service';
 import { StakeholderType } from './entities/ledger-entry.entity';
@@ -52,8 +53,8 @@ export class LedgerController {
     const { entries, total } = await this.ledgerService.findByStakeholder(
       stakeholderType,
       req.user.id,
-      Number(limit),
-      Number(offset),
+      clampLimit(limit),
+      clampOffset(offset),
     );
 
     return { stakeholderType, count: entries.length, total, entries };
@@ -80,8 +81,8 @@ export class LedgerController {
     const { entries, total } = await this.ledgerService.findByStakeholder(
       StakeholderType.DRIVER,
       driverId,
-      Number(limit),
-      Number(offset),
+      clampLimit(limit),
+      clampOffset(offset),
     );
 
     return { count: entries.length, total, entries };

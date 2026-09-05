@@ -103,12 +103,12 @@ export class AuthService {
       // Don't throw error - user is created, just log the issue
     }
 
-    const token = this.generateToken(user);
+    const session = await this.issueSession(user);
 
     return {
       message: 'Registration successful. You can now login.',
       user: this.sanitizeUser(user),
-      token,
+      ...session,
     };
   }
 
@@ -127,7 +127,10 @@ export class AuthService {
       throw new BadRequestException('No OTP found. Please request a new one.');
     }
 
-    if (user.otpCode !== dto.otp) {
+    // Constant-time. A short-circuiting `!==` leaks the code digit by
+    // digit over enough requests; OtpUtil.matches was written for this and
+    // was not actually being used anywhere.
+    if (!OtpUtil.matches(dto.otp, user.otpCode)) {
       throw new BadRequestException('Invalid OTP');
     }
 
@@ -145,12 +148,12 @@ export class AuthService {
       console.error('Failed to send welcome email:', error);
     }
 
-    const token = this.generateToken(user);
+    const session = await this.issueSession(user);
 
     return {
       message: 'Account verified successfully',
       user: this.sanitizeUser({ ...user, isVerified: true }),
-      token,
+      ...session,
     };
   }
 
@@ -212,12 +215,12 @@ export class AuthService {
       );
     }
 
-    const token = this.generateToken(user);
+    const session = await this.issueSession(user);
 
     return {
       message: 'Login successful',
       user: this.sanitizeUser(user),
-      token,
+      ...session,
     };
   }
 
@@ -254,7 +257,7 @@ export class AuthService {
       throw new BadRequestException('User not found');
     }
 
-    if (!user.otpCode || user.otpCode !== dto.otp) {
+    if (!OtpUtil.matches(dto.otp, user.otpCode)) {
       throw new BadRequestException('Invalid OTP');
     }
 
@@ -316,7 +319,7 @@ export class AuthService {
     }
 
     // 3. Issue application JWT
-    const token = this.generateToken(user);
+    const session = await this.issueSession(user);
 
     return {
       message: 'Decane authentication successful',
@@ -326,18 +329,32 @@ export class AuthService {
         addresses: decaneUser.addresses,
         linkedAccounts: decaneUser.linkedAccounts,
       },
-      token,
+      ...session,
     };
   }
 
-  private generateToken(user: User): string {
-    const payload = { 
-      sub: user.id, 
-      email: user.email,
-      role: user.role || Role.USER,
-      type: 'user'
-    };
-    return this.jwtService.sign(payload);
+  /**
+   * Issue a full session for a rider: short access token PLUS a refresh token.
+   *
+   * This replaces a bare `jwtService.sign()`. Access tokens are now one hour
+   * rather than seven days, which is only an improvement if there is something
+   * to renew them with — without this, every email/password user would be
+   * signed out after an hour with no way back except re-entering their
+   * password. Privy sign-in and password sign-in must hand back the same kind
+   * of session, or clients need two refresh strategies.
+   *
+   * `token` is kept alongside `accessToken` so existing clients reading
+   * `data.token` keep working through the rollout.
+   */
+  private async issueSession(
+    user: User,
+    context: { userAgent?: string | null; ipAddress?: string | null } = {},
+  ) {
+    const session = await this.tokenService.issueSession(
+      { id: user.id, role: user.role || Role.USER, isDriver: false },
+      context,
+    );
+    return { ...session, token: session.accessToken };
   }
 
   private sanitizeUser(user: User) {

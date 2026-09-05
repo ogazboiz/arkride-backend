@@ -17,6 +17,12 @@ import { Role } from '../../common/enums/role.enum';
 /** Which side of the platform the caller is signing in as. */
 export type PrivyAudience = 'rider' | 'driver';
 
+/** What a verified Privy identity token attests to. */
+export interface PrivyIdentity {
+  wallet: string | null;
+  email: string | null;
+}
+
 export interface PrivySignInInput {
   accessToken: string;
   /** Privy's signed identity token, for the embedded wallet. Optional. */
@@ -24,7 +30,6 @@ export interface PrivySignInInput {
   audience: PrivyAudience;
   /** Only used when provisioning a brand-new rider. */
   name?: string;
-  email?: string;
   userAgent?: string | null;
   ipAddress?: string | null;
 }
@@ -97,36 +102,49 @@ export class PrivyAuthService {
       throw new UnauthorizedException('Invalid Privy access token.');
     }
 
-    // Best-effort. A missing or stale identity token must not block sign-in;
-    // it only means we do not learn the wallet on this attempt.
-    const wallet = await this.privy.walletFromIdentityToken(input.identityToken);
+    // Everything below the DID comes from Privy's SIGNED claims, never from
+    // the request body. Best-effort: a missing or stale identity token must not
+    // block sign-in, it only means we learn nothing extra on this attempt.
+    const identity = await this.privy.identityFrom(input.identityToken);
 
     return input.audience === 'driver'
-      ? this.signInDriver(did, wallet, input)
-      : this.signInRider(did, wallet, input);
+      ? this.signInDriver(did, identity, input)
+      : this.signInRider(did, identity, input);
   }
 
   /** Riders are provisioned on first sign-in. */
   private async signInRider(
     did: string,
-    wallet: string | null,
+    identity: PrivyIdentity,
     input: PrivySignInInput,
   ): Promise<PrivySignInResult> {
     let user = await this.users.findOne({ where: { privyDid: did } });
     let isNewAccount = false;
 
-    if (!user && input.email) {
-      // An existing password account with the same verified email is the SAME
-      // person, so link rather than create a second row that would collide on
-      // the unique email column anyway.
+    // ACCOUNT LINKING — read this before changing it.
+    //
+    // `identity.email` comes from Privy's SIGNED identity token. It must never
+    // come from `input.email`, which is an unauthenticated request body.
+    //
+    // With a body-supplied email the flow was a full account takeover: anyone
+    // could create their own Privy account in the shared WorldStreet app, get a
+    // genuine access token, POST it with `email: "victim@example.com"`, and —
+    // because a legacy password account has a NULL privyDid, so the
+    // already-linked guard below does not fire — have their DID written onto
+    // the victim's row and be handed a session as them. The wallet sync a few
+    // lines down would then repoint the victim's payout address too.
+    //
+    // Privy verified the address; that is what makes it the same person.
+    const verifiedEmail = identity.email;
+
+    if (!user && verifiedEmail) {
       const byEmail = await this.users.findOne({
-        where: { email: input.email.toLowerCase() },
+        where: { email: verifiedEmail },
       });
       if (byEmail) {
         if (byEmail.privyDid && byEmail.privyDid !== did) {
           // Two different DIDs claiming one email. Refuse rather than
-          // re-point the account — this is the shape an account-takeover
-          // attempt would have.
+          // re-point the account.
           throw new ForbiddenException(
             'This email is already linked to a different Privy account.',
           );
@@ -142,9 +160,13 @@ export class PrivyAuthService {
         name: input.name?.trim() || 'Ark Rider',
         // Privy accounts may have no email at all (phone or wallet login), so
         // a placeholder keyed on the DID keeps the NOT NULL unique column
-        // satisfiable without inventing a plausible-looking address that
-        // could collide with a real one.
-        email: input.email?.toLowerCase() || `${did}@privy.arkrides.local`,
+        // satisfiable without inventing a plausible-looking address that could
+        // collide with a real one.
+        //
+        // Only the VERIFIED address is ever written here. A body-supplied one
+        // would let a caller squat an address they do not control, so that a
+        // later genuine sign-in by its real owner links to the squatter's row.
+        email: verifiedEmail || `${did}@privy.arkrides.local`,
         // Privy verified the identity; there is nothing for our OTP to add.
         isVerified: true,
         role: Role.USER,
@@ -157,8 +179,8 @@ export class PrivyAuthService {
       throw new ForbiddenException('Your account has been blocked.');
     }
 
-    if (wallet && user.walletAddressEvm?.toLowerCase() !== wallet) {
-      user.walletAddressEvm = wallet;
+    if (identity.wallet && user.walletAddressEvm?.toLowerCase() !== identity.wallet) {
+      user.walletAddressEvm = identity.wallet;
     }
 
     const saved = await this.users.save(user);
@@ -200,14 +222,15 @@ export class PrivyAuthService {
    */
   private async signInDriver(
     did: string,
-    wallet: string | null,
+    identity: PrivyIdentity,
     input: PrivySignInInput,
   ): Promise<PrivySignInResult> {
     let driver = await this.drivers.findOne({ where: { privyDid: did } });
 
-    if (!driver && input.email) {
+    // Verified email only — see signInRider for the takeover this prevents.
+    if (!driver && identity.email) {
       const byEmail = await this.drivers.findOne({
-        where: { email: input.email.toLowerCase() },
+        where: { email: identity.email },
       });
       if (byEmail) {
         if (byEmail.privyDid && byEmail.privyDid !== did) {
@@ -231,8 +254,8 @@ export class PrivyAuthService {
       throw new ForbiddenException('Your driver account has been deactivated.');
     }
 
-    if (wallet && driver.walletAddressEvm?.toLowerCase() !== wallet) {
-      driver.walletAddressEvm = wallet;
+    if (identity.wallet && driver.walletAddressEvm?.toLowerCase() !== identity.wallet) {
+      driver.walletAddressEvm = identity.wallet;
     }
 
     const saved = await this.drivers.save(driver);

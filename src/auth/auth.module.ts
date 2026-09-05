@@ -12,16 +12,16 @@ import { DecaneService } from './decane.service';
 import { AuthResolverService } from './services/auth-resolver.service';
 import { jwtModuleOptions } from '../config/jwt.config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { RefreshToken } from './entities/refresh-token.entity';
 import { User } from '../users/entities/user.entity';
 import { Driver } from '../drivers/entities/driver.entity';
-import { TokenService } from './services/token.service';
+import { TokenModule } from './token.module';
 import { PrivyService } from './privy/privy.service';
 import { PrivyAuthService } from './privy/privy-auth.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RefreshToken, User, Driver]),
+    TypeOrmModule.forFeature([User, Driver]),
+    TokenModule,
     UsersModule, 
     DriversModule,
     PassportModule, 
@@ -38,7 +38,6 @@ import { PrivyAuthService } from './privy/privy-auth.service';
     JwtStrategy,
     DecaneService,
     AuthResolverService,
-    TokenService,
     PrivyService,
     PrivyAuthService,
   ],
@@ -49,7 +48,6 @@ import { PrivyAuthService } from './privy/privy-auth.service';
     JwtModule,
     DecaneService,
     AuthResolverService,
-    TokenService,
     PrivyService,
   ],
 })

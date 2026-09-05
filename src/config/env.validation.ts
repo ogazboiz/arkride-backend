@@ -51,7 +51,18 @@ interface EnvRule {
   because: string;
 }
 
+/** The only values NODE_ENV may take. Anything else is a typo. */
+export const VALID_NODE_ENVS = ['development', 'test', 'staging', 'production'];
+
 const RULES: EnvRule[] = [
+  {
+    key: 'NODE_ENV',
+    scope: 'always',
+    because:
+      'it decides whether Swagger is exposed, whether CORS falls back to ' +
+      'localhost, and whether the production-only variables below are ' +
+      'enforced — every one of which fails OPEN when it is unset',
+  },
   {
     key: 'JWT_SECRET',
     scope: 'always',
@@ -99,9 +110,25 @@ function isMissing(value: string | undefined): boolean {
  * `process.env` or bootstrapping Nest.
  */
 export function collectEnvProblems(env: NodeJS.ProcessEnv): string[] {
-  const nodeEnv = env.NODE_ENV ?? 'development';
+  // NOT `?? 'development'`. Defaulting an unset NODE_ENV to development is
+  // fail-OPEN: `compose.yml` does not set it, so a production container that
+  // inherited nothing would skip every production rule, mount Swagger
+  // unauthenticated, and allowlist localhost as a CORS origin. Unset is a
+  // problem to report, not a mode to assume.
+  const nodeEnv = env.NODE_ENV;
   const isDevLike = nodeEnv === 'development' || nodeEnv === 'test';
   const problems: string[] = [];
+
+  // A typo here is worse than an omission: `NODE_ENV=prod` is not
+  // 'production', so every production-only rule below would be skipped and
+  // Swagger would be served publicly, all without a single error.
+  if (env.NODE_ENV !== undefined && !VALID_NODE_ENVS.includes(env.NODE_ENV)) {
+    problems.push(
+      `NODE_ENV is "${env.NODE_ENV}", which is not one of ` +
+        `${VALID_NODE_ENVS.join(', ')} — anything else silently disables the ` +
+        `production safety checks.`,
+    );
+  }
 
   for (const rule of RULES) {
     const enforced = rule.scope === 'always' || !isDevLike;

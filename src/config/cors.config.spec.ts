@@ -67,6 +67,12 @@ describe('CORS policy', () => {
       });
     });
 
+    it('does not enable credentialed cross-origin requests', () => {
+      // The API is bearer-token authenticated; cookies are never used, so
+      // credentials only widen the blast radius of an allowlist mistake.
+      expect(corsOptions({ NODE_ENV: 'production' }).credentials).toBe(false);
+    });
+
     it('permits the headers Privy and internal callers actually send', () => {
       const options = corsOptions({ NODE_ENV: 'production' });
       expect(options.allowedHeaders).toEqual(

@@ -10,12 +10,17 @@ import {
   HttpStatus,
   ParseFloatPipe,
   NotFoundException,
+  ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
+import { enveloped } from '../common/dto/api-response';
 import { DriverLocationsService } from './driver-locations.service';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { firstNameOf } from './driver-locations.service';
+import type { Principal } from '../common/utils/ownership.util';
 import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
@@ -90,15 +95,15 @@ export class DriverLocationsController {
       updateLocationDto,
     );
 
-    return {
-      message: 'Location updated successfully',
-      location: {
+    return enveloped(
+      {
         id: location.driverId,
         latitude: Number(location.latitude),
         longitude: Number(location.longitude),
         updatedAt: location.updatedAt,
       },
-    };
+      'Location updated successfully',
+    );
   }
 
   /**
@@ -132,19 +137,47 @@ export class DriverLocationsController {
   @ApiOperation({ summary: 'Get location for a specific driver' })
   @ApiParam({ name: 'driverId', description: 'Driver UUID' })
   @ApiOkResponse({ description: 'Driver location fetched successfully.' })
-  async getDriverLocation(@Param('driverId') driverId: string) {
+  async getDriverLocation(
+    @Param('driverId', new ParseUUIDPipe({ version: '4' })) driverId: string,
+    @CurrentUser() principal: Principal,
+  ) {
+    // SECURITY: this route had no ownership check at all, and it returned the
+    // driver's FULL NAME, PHONE NUMBER and exact coordinates to any
+    // authenticated account.
+    //
+    // That also silently undid the hardening on /nearby two handlers down.
+    // /nearby stopped returning names and phone numbers — but it still returns
+    // driver IDS, so the fleet scrape simply became two requests instead of
+    // one: sweep /nearby for ids, then call this for each. Redacting one
+    // endpoint while the other stayed open was cosmetic.
+    //
+    // Live position is now visible to: the driver themselves, an admin, or a
+    // rider who has an ACTIVE ride assigned to that driver — which is the only
+    // legitimate reason a rider has to watch someone's car move.
+    const allowed = await this.driverLocationsService.canViewDriverLocation(
+      principal,
+      driverId,
+    );
+    if (!allowed) {
+      throw new ForbiddenException(
+        'You can only view the location of a driver on your active ride.',
+      );
+    }
+
     const location = await this.driverLocationsService.findByDriverId(driverId);
 
     if (!location.driver) {
-      throw new NotFoundException([`Driver ${driverId} not found`]);
+      throw new NotFoundException(`Driver ${driverId} not found`);
     }
 
     return {
-      id: location.driver?.id ?? driverId,
+      id: location.driver.id,
       driver: {
-        id: location?.driver.id,
-        name: location?.driver.name,
-        phone: location?.driver.phone,
+        id: location.driver.id,
+        // First name only, and no phone. A rider who needs to call their
+        // driver gets the number from the RIDE, which exists only once the
+        // two are actually matched.
+        name: firstNameOf(location.driver.name),
       },
       latitude: Number(location.latitude),
       longitude: Number(location.longitude),

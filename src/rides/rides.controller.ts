@@ -24,6 +24,7 @@ import { Role } from '../common/enums/role.enum';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { assertOwnership, assertPartyToRide } from '../common/utils/ownership.util';
 import type { Principal } from '../common/utils/ownership.util';
+import { enveloped } from '../common/dto/api-response';
 import { ApiBearerAuth, ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 /**
@@ -64,10 +65,7 @@ export class RidesController {
   @ApiOkResponse({ description: 'Estimates calculated successfully.', type: EstimateResponseDto })
   async estimateRide(@Body() estimateDto: EstimateRideDto) {
     const estimates = await this.ridesService.estimateRide(estimateDto);
-    return {
-      message: 'Estimates calculated successfully',
-      estimates,
-    };
+    return enveloped(estimates, 'Estimates calculated successfully');
   }
 
   /**
@@ -107,10 +105,7 @@ export class RidesController {
       ...createRideDto,
       userId: principal.id,
     });
-    return {
-      message: 'Ride requested successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride requested successfully');
   }
 
   /**
@@ -157,10 +152,7 @@ export class RidesController {
     const userId = req.user.id;
     
     const ride = await this.ridesService.cancelRide(id, cancelDto, userId);
-    return {
-      message: 'Ride cancelled successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride cancelled successfully');
   }
 
   // ==================== DRIVER ENDPOINTS ====================
@@ -224,10 +216,7 @@ export class RidesController {
     const driverId = req.user.id;
     
     const ride = await this.ridesService.acceptRide(id, driverId, updateDto);
-    return {
-      message: 'Ride accepted successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride accepted successfully');
   }
 
   /**
@@ -244,10 +233,7 @@ export class RidesController {
     const driverId = req.user.id;
     
     const ride = await this.ridesService.markArrived(id, driverId);
-    return {
-      message: 'Marked as arrived at pickup location',
-      ride,
-    };
+    return enveloped(ride, 'Marked as arrived at pickup location');
   }
 
   /**
@@ -264,10 +250,7 @@ export class RidesController {
     const driverId = req.user.id;
     
     const ride = await this.ridesService.startRide(id, driverId);
-    return {
-      message: 'Ride started successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride started successfully');
   }
 
   /**
@@ -284,10 +267,7 @@ export class RidesController {
     const driverId = req.user.id;
     
     const ride = await this.ridesService.completeRide(id, driverId);
-    return {
-      message: 'Ride completed successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride completed successfully');
   }
 
   /**
@@ -315,10 +295,7 @@ export class RidesController {
       undefined,
       driverId,
     );
-    return {
-      message: 'Ride cancelled successfully',
-      ride,
-    };
+    return enveloped(ride, 'Ride cancelled successfully');
   }
 
   // ==================== COMMON ENDPOINTS ====================
@@ -376,7 +353,7 @@ export class RidesController {
     // so an unchecked read handed any authenticated caller the rider's name,
     // email and phone plus the driver's record. `getFareBreakdown` on this
     // same controller already checked party membership; this did not.
-    assertPartyToRide(principal, ride, 'view a ride');
+    assertPartyToRide(principal, ride, 'view details');
     return ride;
   }
 }

@@ -70,9 +70,36 @@ describe('environment validation', () => {
       ).toEqual([]);
     });
 
-    it('treats an absent NODE_ENV as development', () => {
-      expect(collectEnvProblems({ JWT_SECRET: GOOD_SECRET })).toEqual([]);
+    it('REFUSES an absent NODE_ENV rather than assuming development', () => {
+      // This was the fail-open. compose.yml sets nothing, so a production
+      // container inheriting no NODE_ENV would have been treated as
+      // development: Swagger served publicly, localhost allowlisted for CORS,
+      // and every production-only check skipped — silently.
+      const problems = collectEnvProblems({ JWT_SECRET: GOOD_SECRET });
+      expect(problems.join()).toContain('NODE_ENV');
     });
+
+    it.each(['prod', 'PRODUCTION', 'dev', 'staging '])(
+      'rejects the near-miss NODE_ENV value %p',
+      (value) => {
+        // `NODE_ENV=prod` is not 'production', so it would skip every
+        // production rule while looking entirely deliberate.
+        const problems = collectEnvProblems({
+          NODE_ENV: value,
+          JWT_SECRET: GOOD_SECRET,
+        });
+        expect(problems.join()).toContain('NODE_ENV');
+      },
+    );
+
+    it.each(['development', 'test', 'staging', 'production'])(
+      'accepts the valid value %p',
+      (value) => {
+        const env = completeProdEnv();
+        env.NODE_ENV = value;
+        expect(collectEnvProblems(env)).toEqual([]);
+      },
+    );
 
     it('treats test the same as development', () => {
       expect(

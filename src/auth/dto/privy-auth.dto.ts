@@ -1,5 +1,4 @@
 import {
-  IsEmail,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -52,14 +51,16 @@ export class PrivySignInDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({
-    example: 'amina@example.com',
-    description:
-      'Used to link an existing email/password account to this Privy identity.',
-  })
-  @IsOptional()
-  @IsEmail({}, { message: 'email must be a valid email address' })
-  email?: string;
+  // NOTE: there is deliberately NO `email` field.
+  //
+  // It used to be here, and it was an account takeover: the address was taken
+  // from this body and used to link a Privy DID onto an existing account, so
+  // anyone with their own valid Privy token could name a victim's address and
+  // be handed that account — plus have the victim's payout wallet repointed.
+  //
+  // The email used for linking now comes from Privy's SIGNED identity token
+  // (send it as `identityToken`, or as the `privy-id-token` header). Do not
+  // reintroduce this field.
 }
 
 export class RefreshSessionDto {

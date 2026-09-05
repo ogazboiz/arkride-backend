@@ -16,6 +16,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { clampLimit, clampOffset } from '../common/utils/pagination.util';
 import { WalletService } from './wallet.service';
 import { RequestFuelSupportDto, RequestPayoutDto } from './dto/wallet.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -98,8 +99,8 @@ export class WalletController {
   ) {
     return await this.walletService.getTransactions(
       req.user.id,
-      Number(limit),
-      Number(offset),
+      clampLimit(limit),
+      clampOffset(offset),
     );
   }
 }

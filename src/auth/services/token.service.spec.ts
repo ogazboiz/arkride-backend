@@ -255,6 +255,43 @@ describe('TokenService', () => {
       });
     });
 
+    describe('concurrency', () => {
+      it('never lets two simultaneous refreshes both succeed', async () => {
+        // The TOCTOU this guards: both callers read `revokedAt = null`, both
+        // pass the reuse check, both write, and the session FORKS into two
+        // live tokens with reuse detection never firing. A thief only has to
+        // fire at the same moment as the victim.
+        //
+        // Two requests carrying the same refresh token at the same instant is
+        // indistinguishable from theft, so the answer is that NOBODY keeps the
+        // session — not "first one wins", which would hand it to whichever of
+        // the thief and the victim was faster. Clients must serialise their
+        // refreshes; standard ones do.
+        const first = await service.issueSession(rider);
+
+        const results = await Promise.allSettled([
+          service.rotate(first.refreshToken, alwaysResolve(rider)),
+          service.rotate(first.refreshToken, alwaysResolve(rider)),
+        ]);
+
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(0);
+        expect(results.filter((r) => r.status === 'rejected')).toHaveLength(2);
+        // And critically: no live token is left behind.
+        expect(repo.rows.every((row) => row.revokedAt)).toBe(true);
+      });
+
+      it('revokes the family when a concurrent claim loses', async () => {
+        // Losing the race is indistinguishable from a replay, and gets the
+        // same answer: both parties are signed out.
+        const first = await service.issueSession(rider);
+        await Promise.allSettled([
+          service.rotate(first.refreshToken, alwaysResolve(rider)),
+          service.rotate(first.refreshToken, alwaysResolve(rider)),
+        ]);
+        expect(repo.rows.every((row) => row.revokedAt)).toBe(true);
+      });
+    });
+
     describe('subject re-resolution', () => {
       it('asks the resolver about the subject the token points at', async () => {
         const first = await service.issueSession(driver);
@@ -270,8 +307,18 @@ describe('TokenService', () => {
         await expect(
           service.rotate(first.refreshToken, async () => null),
         ).rejects.toThrow(UnauthorizedException);
+        // The presented token is consumed either way, and no new one is minted.
         expect(repo.rows[0].revokedAt).toBeInstanceOf(Date);
-        expect(repo.rows[0].revokedReason).toBe('subject-unavailable');
+        expect(repo.rows).toHaveLength(1);
+      });
+
+      it('leaves nothing spendable when the subject is gone', async () => {
+        const first = await service.issueSession(rider);
+        const second = await service.rotate(first.refreshToken, alwaysResolve(rider));
+        await expect(
+          service.rotate(second.refreshToken, async () => null),
+        ).rejects.toThrow(UnauthorizedException);
+        expect(repo.rows.every((row) => row.revokedAt)).toBe(true);
       });
     });
   });
@@ -302,6 +349,18 @@ describe('TokenService', () => {
       await service.revokeByToken(first.refreshToken);
       await expect(service.revokeByToken(first.refreshToken)).resolves.toBeUndefined();
       // Crucially it does NOT re-run as reuse detection and change the reason.
+      expect(repo.rows[0].revokedReason).toBe('logout');
+    });
+
+    it('a logged-out token presented to refresh is a 401, NOT a breach', async () => {
+      // Retrying after a dropped logout response is not an attack, and
+      // recording it as one would overwrite the audit reason so that a normal
+      // logout looked like a compromise.
+      const first = await service.issueSession(rider);
+      await service.revokeByToken(first.refreshToken);
+      await expect(
+        service.rotate(first.refreshToken, alwaysResolve(rider)),
+      ).rejects.toThrow(UnauthorizedException);
       expect(repo.rows[0].revokedReason).toBe('logout');
     });
   });

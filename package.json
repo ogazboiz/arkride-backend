@@ -32,7 +32,9 @@
     "migration:run:prod": "typeorm -d dist/data-source.js migration:run",
     "migration:revert:prod": "typeorm -d dist/data-source.js migration:revert",
     "migration:show:prod": "typeorm -d dist/data-source.js migration:show",
-    "schema:sync:dev": "ts-node scripts/dev/sync-schema.ts"
+    "schema:sync:dev": "ts-node scripts/dev/sync-schema.ts",
+    "verify:stats": "ts-node scripts/dev/verify-stats.ts",
+    "verify:exploits": "node scripts/dev/exploit-suite.mjs"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",

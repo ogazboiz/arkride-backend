@@ -1,4 +1,5 @@
 import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
+import { isDevelopment } from './environment';
 
 /**
  * CORS policy.
@@ -50,7 +51,8 @@ export function isOriginAllowed(
 }
 
 export function corsOptions(env: NodeJS.ProcessEnv = process.env): CorsOptions {
-  const isDev = (env.NODE_ENV ?? 'development') === 'development';
+  // Fails closed — an unset NODE_ENV does not allowlist localhost.
+  const isDev = isDevelopment(env);
   const allowlist = parseOrigins(env.CORS_ORIGINS);
 
   return {
@@ -64,7 +66,13 @@ export function corsOptions(env: NodeJS.ProcessEnv = process.env): CorsOptions {
       // failure the browser console should be showing.
       callback(null, false);
     },
-    credentials: true,
+    // NOT `credentials: true`.
+    //
+    // This API authenticates with `Authorization: Bearer`, never with cookies,
+    // so credentialed cross-origin requests buy nothing — while making the
+    // `origin === undefined` allowance above look load-bearing when it is not,
+    // and widening the blast radius of any future allowlist mistake.
+    credentials: false,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',

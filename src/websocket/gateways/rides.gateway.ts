@@ -33,6 +33,14 @@ import type {
   EmergencyEvent,
 } from '../events/ride-events.constants';
 import { requireJwtSecret } from '../../config/jwt.config';
+
+/**
+ * Ride ids are UUIDs. Anything else must be rejected before it reaches
+ * Postgres, which raises 22P02 for a malformed uuid — an exception with
+ * nowhere useful to go inside a socket handler.
+ */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 import { corsOptions } from '../../config/cors.config';
 import { Ride } from '../../rides/entities/ride.entity';
 import { isPartyToRide } from '../../common/utils/ownership.util';
@@ -199,6 +207,17 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { status: 'error', message: 'rideId is required' };
     }
 
+    // Validate the SHAPE before it reaches the database.
+    //
+    // `rideId` comes verbatim from a client message. A non-UUID makes Postgres
+    // raise 22P02, which surfaces as a QueryFailedError inside a socket
+    // handler — a place with no HTTP response to turn it into a 400. Checking
+    // here keeps a malformed id a normal error answer instead of an exception
+    // travelling up through the transport.
+    if (!UUID_PATTERN.test(rideId)) {
+      return { status: 'error', message: 'rideId must be a UUID' };
+    }
+
     const principal = client.data?.principal;
     if (!principal) {
       // Should be unreachable: handleConnection rejects unauthenticated
@@ -237,8 +256,8 @@ export class RidesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() body: { rideId?: string },
   ) {
     const rideId = body?.rideId;
-    if (!rideId) {
-      return { status: 'error', message: 'rideId is required' };
+    if (!rideId || !UUID_PATTERN.test(rideId)) {
+      return { status: 'error', message: 'rideId must be a UUID' };
     }
 
     await client.leave(ROOMS.ride(rideId));

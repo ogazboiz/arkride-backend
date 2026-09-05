@@ -79,3 +79,144 @@ describe('AuthResolverService', () => {
     );
   });
 });
+
+describe('AuthResolverService — privilege and credential hardening', () => {
+  const { stripCredentials } = require('./auth-resolver.service');
+
+  describe('the role comes from the database, not the token', () => {
+    let resolver: AuthResolverService;
+    let usersService: { findById: jest.Mock };
+    let driversService: { findForAuth: jest.Mock };
+
+    beforeEach(() => {
+      usersService = { findById: jest.fn() };
+      driversService = { findForAuth: jest.fn() };
+      resolver = new AuthResolverService(
+        usersService as any,
+        driversService as any,
+      );
+    });
+
+    it('IGNORES role: admin in the token when the row says otherwise', async () => {
+      // This used to `return { ...user, role: Role.ADMIN }` on the strength of
+      // the claim alone. Demoting an admin in the database therefore did
+      // nothing for the full lifetime of their access token.
+      usersService.findById.mockResolvedValue({
+        id: 'user-1',
+        email: 'a@b.com',
+        role: Role.USER,
+        isBlocked: false,
+      });
+
+      const principal = await resolver.resolvePrincipal({
+        sub: 'user-1',
+        role: Role.ADMIN,
+      });
+
+      expect(principal.role).toBe(Role.USER);
+    });
+
+    it('grants admin when the DATABASE says admin, whatever the token claims', async () => {
+      usersService.findById.mockResolvedValue({
+        id: 'admin-1',
+        email: 'a@b.com',
+        role: Role.ADMIN,
+        isBlocked: false,
+      });
+
+      const principal = await resolver.resolvePrincipal({
+        sub: 'admin-1',
+        role: Role.USER,
+      });
+
+      expect(principal.role).toBe(Role.ADMIN);
+    });
+
+    it('refuses a blocked rider', async () => {
+      // The drivers branch already refused deactivated drivers; riders had no
+      // equivalent, so a blocked rider kept full access until their token
+      // expired.
+      usersService.findById.mockResolvedValue({
+        id: 'user-1',
+        role: Role.USER,
+        isBlocked: true,
+      });
+
+      await expect(
+        resolver.resolvePrincipal({ sub: 'user-1', role: Role.USER }),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('never puts the password hash on the principal', async () => {
+      usersService.findById.mockResolvedValue({
+        id: 'user-1',
+        role: Role.USER,
+        isBlocked: false,
+        password: '$2b$10$hashhashhash',
+        otpCode: '123456',
+      });
+
+      const principal = await resolver.resolvePrincipal({ sub: 'user-1' });
+      expect(principal).not.toHaveProperty('password');
+      expect(principal).not.toHaveProperty('otpCode');
+    });
+
+    it('still uses `type` to pick the TABLE, which is not a permission', async () => {
+      // users and drivers have separate id spaces, so the token has to say
+      // which one to look in. That part is legitimate.
+      driversService.findForAuth.mockResolvedValue({
+        id: 'shared-id',
+        role: Role.DRIVER,
+        isActive: true,
+      });
+
+      await resolver.resolvePrincipal({ sub: 'shared-id', type: 'driver' });
+      expect(driversService.findForAuth).toHaveBeenCalledWith('shared-id');
+      expect(usersService.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('stripCredentials', () => {
+    it('removes the password hash, OTP code and OTP expiry', () => {
+      // `{ ...user }` used to put all three on req.user for every
+      // authenticated request, and @CurrentUser() hands that object to every
+      // controller.
+      const safe = stripCredentials({
+        id: 'user-1',
+        name: 'Amina',
+        email: 'a@b.com',
+        password: '$2b$10$hashhashhash',
+        otpCode: '123456',
+        otpExpiry: new Date(),
+        role: 'user',
+      });
+
+      expect(safe).not.toHaveProperty('password');
+      expect(safe).not.toHaveProperty('otpCode');
+      expect(safe).not.toHaveProperty('otpExpiry');
+      expect(JSON.stringify(safe)).not.toContain('$2b$10$');
+    });
+
+    it('keeps everything a controller legitimately reads', () => {
+      const safe = stripCredentials({
+        id: 'user-1',
+        name: 'Amina',
+        email: 'a@b.com',
+        role: 'user',
+        walletAddressEvm: '0xabc',
+        password: 'x',
+      });
+      expect(safe).toEqual({
+        id: 'user-1',
+        name: 'Amina',
+        email: 'a@b.com',
+        role: 'user',
+        walletAddressEvm: '0xabc',
+      });
+    });
+
+    it('is harmless on an object with none of them', () => {
+      expect(stripCredentials({ id: 'x' })).toEqual({ id: 'x' });
+    });
+  });
+});

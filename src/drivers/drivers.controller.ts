@@ -42,6 +42,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { enveloped } from '../common/dto/api-response';
 
 @ApiTags('Drivers')
 @Controller('api/v1/drivers')
@@ -58,11 +59,13 @@ export class DriversController {
   @ApiOkResponse({ description: 'Driver registration successful.' })
   async create(@Body() createDriverDto: CreateDriverDto) {
     const result = await this.driversService.create(createDriverDto);
-    return {
-      message: 'Driver registration successful. You can now start using the app.',
-      driver: result.driver,
-      token: result.token,
-    };
+    // Spread the whole result. Cherry-picking `token` here silently dropped
+    // `refreshToken` / `expiresIn`, so a driver who had just registered had a
+    // one-hour session and no way to renew it.
+    return enveloped(
+      result,
+      'Driver registration successful. You can now start using the app.',
+    );
   }
 
   @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
@@ -130,10 +133,7 @@ export class DriversController {
   ) {
     assertOwnership(principal, id, 'update your own driver profile');
     const driver = await this.driversService.update(id, updateDriverDto);
-    return {
-      message: 'Driver updated successfully',
-      driver,
-    };
+    return enveloped(driver, 'Driver updated successfully');
   }
 
   @Patch(':id/online-status')
@@ -154,16 +154,11 @@ export class DriversController {
       isOnlineType: typeof updateOnlineStatusDto?.isOnline,
     });
 
-    if (req.user.id !== id) {
-      this.logger.warn({
-        message: 'Driver online status update denied: user can only update own status',
-        driverIdParam: id,
-        authenticatedUserId: req.user?.id,
-        authenticatedUserRole: req.user?.role,
-      });
-
-      throw new ForbiddenException('You can only update your own online status');
-    }
+    // Was a hand-rolled `req.user.id !== id`, which had no admin escape and so
+    // silently contradicted ownership.util's stated rule that an admin may act
+    // on anything. The whole point of that file is that these stop being
+    // written per handler.
+    assertOwnership(req.user, id, 'update your own online status');
 
     const driver = await this.driversService.updateOnlineStatus(
       id,
@@ -176,10 +171,7 @@ export class DriversController {
       isOnline: driver.isOnline,
     });
 
-    return {
-      message: `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`,
-      driver,
-    };
+    return enveloped(driver, `Driver is now ${updateOnlineStatusDto.isOnline ? 'online' : 'offline'}`);
   }
 
   @Patch(':id/verification-status')
@@ -196,10 +188,7 @@ export class DriversController {
       id,
       dto.status,
     );
-    return {
-      message: 'Verification status updated successfully',
-      driver,
-    };
+    return enveloped(driver, 'Verification status updated successfully');
   }
 
   /**
@@ -224,10 +213,7 @@ export class DriversController {
       dto.isActive,
       dto.reason,
     );
-    return {
-      message: `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`,
-      driver,
-    };
+    return enveloped(driver, `Driver ${dto.isActive ? 'reinstated' : 'suspended'} successfully`);
   }
 
   @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })

@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
@@ -30,6 +31,7 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { enveloped } from '../common/dto/api-response';
 
 /**
  * Vehicles.
@@ -70,24 +72,32 @@ export class VehiclesController {
     // whole fix. Rejecting a driver-supplied driverId (rather than quietly
     // overwriting it) means a client that believes it is choosing the owner
     // gets told it is not.
-    const ownerId = isAdmin(principal)
-      ? (createVehicleDto.driverId ?? principal.id)
-      : principal.id;
-
+    // Refuse FIRST, then decide the owner. Computing it before the check read
+    // backwards even though nothing observable happened in between.
     if (!isAdmin(principal) && createVehicleDto.driverId !== undefined) {
       throw new ForbiddenException(
         'You cannot register a vehicle for another driver.',
       );
     }
 
+    // An admin must NAME the driver. Falling back to `principal.id` handed the
+    // service an id from the USERS table, which then failed with a misleading
+    // "Driver not found".
+    if (isAdmin(principal) && !createVehicleDto.driverId) {
+      throw new BadRequestException(
+        'An admin must specify which driver this vehicle belongs to.',
+      );
+    }
+
+    const ownerId = isAdmin(principal)
+      ? (createVehicleDto.driverId as string)
+      : principal.id;
+
     const vehicle = await this.vehiclesService.create({
       ...createVehicleDto,
       driverId: ownerId,
     });
-    return {
-      message: 'Vehicle created successfully',
-      vehicle,
-    };
+    return enveloped(vehicle, 'Vehicle created successfully');
   }
 
   /** The whole fleet. Admin only — this was readable by any rider. */
@@ -150,10 +160,7 @@ export class VehiclesController {
   ) {
     await this.assertOwnsVehicle(principal, id, 'deactivate your own vehicles');
     const vehicle = await this.vehiclesService.deactivate(id);
-    return {
-      message: 'Vehicle deactivated successfully',
-      vehicle,
-    };
+    return enveloped(vehicle, 'Vehicle deactivated successfully');
   }
 
   @Patch(':id/activate')
@@ -168,10 +175,7 @@ export class VehiclesController {
   ) {
     await this.assertOwnsVehicle(principal, id, 'activate your own vehicles');
     const vehicle = await this.vehiclesService.activate(id);
-    return {
-      message: 'Vehicle activated successfully',
-      vehicle,
-    };
+    return enveloped(vehicle, 'Vehicle activated successfully');
   }
 
   @Patch(':id')
@@ -187,10 +191,7 @@ export class VehiclesController {
   ) {
     await this.assertOwnsVehicle(principal, id, 'update your own vehicles');
     const vehicle = await this.vehiclesService.update(id, updateVehicleDto);
-    return {
-      message: 'Vehicle updated successfully',
-      vehicle,
-    };
+    return enveloped(vehicle, 'Vehicle updated successfully');
   }
 
   @Delete(':id')

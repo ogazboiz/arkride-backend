@@ -15,6 +15,8 @@ import {
   DRIVER_ACTIVE_PREFIX,
   DRIVER_ACTIVE_RIDE_PREFIX,
 } from '../redis/redis.constants';
+import { Ride, RideStatus } from '../rides/entities/ride.entity';
+import { Role } from '../common/enums/role.enum';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RIDE_EVENTS } from '../websocket/events/ride-events.constants';
 
@@ -33,6 +35,11 @@ export class DriverLocationsService {
   constructor(
     @InjectRepository(Driver)
     private readonly driverRepository: Repository<Driver>,
+
+    // Needed only to answer "does this rider have an active ride with this
+    // driver?" — see canViewDriverLocation.
+    @InjectRepository(Ride)
+    private readonly rideRepository: Repository<Ride>,
 
     // Inject our high-speed Redis client
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -190,6 +197,45 @@ export class DriverLocationsService {
 
     // Sort by distance
     return finalResults.sort((a, b) => a.distance - b.distance);
+  }
+
+  /**
+   * May this principal see where that driver is right now?
+   *
+   * Live location is not public information about a person. The rule:
+   *
+   *   - a driver may see their own position;
+   *   - an admin may see anyone's;
+   *   - a rider may see a driver they have an ACTIVE ride with, and nobody
+   *     else — which is the only reason a rider ever needs to watch a
+   *     particular car move.
+   *
+   * Anything else is refused. Before this existed, every authenticated account
+   * could read any driver's exact coordinates by id, and ids are handed out by
+   * the /nearby sweep.
+   */
+  async canViewDriverLocation(
+    principal: { id: string; role: Role } | undefined,
+    driverId: string,
+  ): Promise<boolean> {
+    if (!principal) return false;
+    if (principal.role === Role.ADMIN) return true;
+    if (principal.role === Role.DRIVER) return principal.id === driverId;
+
+    const activeRide = await this.rideRepository.findOne({
+      where: {
+        userId: principal.id,
+        driverId,
+        status: In([
+          RideStatus.ACCEPTED,
+          RideStatus.ARRIVED,
+          RideStatus.IN_PROGRESS,
+        ]),
+      },
+      select: { id: true },
+    });
+
+    return Boolean(activeRide);
   }
 
   /**

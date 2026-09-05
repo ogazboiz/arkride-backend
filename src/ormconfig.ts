@@ -1,5 +1,6 @@
 import { PostgresConnectionOptions } from "typeorm/driver/postgres/PostgresConnectionOptions";
 import * as dotenv from 'dotenv';
+import { isDevelopment } from './config/environment';
 
 dotenv.config(); 
 
@@ -44,8 +45,7 @@ const ormconfig: PostgresConnectionOptions = {
    * that setting it in a deployment env file does nothing.
    */
   synchronize:
-    process.env.DB_SYNCHRONIZE === 'true' &&
-    process.env.NODE_ENV === 'development',
+    process.env.DB_SYNCHRONIZE === 'true' && isDevelopment(),
 };
 
 export default ormconfig;

@@ -134,6 +134,81 @@ export class BaselineSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(`CREATE TABLE IF NOT EXISTS users ( id uuid DEFAULT uuid_generate_v4() NOT NULL, name character varying NOT NULL, email character varying NOT NULL, phone character varying, password character varying, provider character varying, "providerId" character varying, "privyDid" character varying, "walletAddressEvm" character varying, "walletAddressSolana" character varying, "walletAddressTron" character varying, "otpCode" character varying, "otpExpiry" timestamp without time zone, "isVerified" boolean DEFAULT false NOT NULL, role users_role_enum DEFAULT 'user'::users_role_enum NOT NULL, "ratingAverage" numeric(3,2) DEFAULT '0'::numeric NOT NULL, "totalRides" integer DEFAULT 0 NOT NULL, "cashbackBalance" numeric(12,2) DEFAULT '0'::numeric NOT NULL, "isBlocked" boolean DEFAULT false NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
     await queryRunner.query(`CREATE TABLE IF NOT EXISTS vehicles ( id uuid DEFAULT uuid_generate_v4() NOT NULL, "driverId" uuid NOT NULL, type vehicles_type_enum NOT NULL, "plateNumber" character varying NOT NULL, color character varying NOT NULL, model character varying NOT NULL, year integer NOT NULL, "isActive" boolean DEFAULT true NOT NULL, "createdAt" timestamp without time zone DEFAULT now() NOT NULL, "updatedAt" timestamp without time zone DEFAULT now() NOT NULL )`);
 
+    // --- reconcile columns on tables that already existed -----------------
+    //
+    // `CREATE TABLE IF NOT EXISTS` above is idempotent but NOT convergent: on
+    // a database that `synchronize` built from an EARLIER version of the
+    // entities, the table is skipped entirely and any column added since is
+    // simply never created. The migration then reports success while
+    // `users."privyDid"` does not exist, and every Privy sign-in fails with a
+    // column error at runtime.
+    //
+    // So each column added after the original synchronize-built schema is
+    // stated again here, explicitly and idempotently. This has to run BEFORE
+    // the constraint section, which puts a UNIQUE index on "privyDid".
+    await queryRunner.query(`
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "privyDid" character varying
+    `);
+    await queryRunner.query(`
+      ALTER TABLE "drivers" ADD COLUMN IF NOT EXISTS "privyDid" character varying
+    `);
+    await queryRunner.query(`
+      ALTER TABLE "drivers" ADD COLUMN IF NOT EXISTS "walletAddressEvm" character varying
+    `);
+    // `DEFAULT '0'` rather than `DEFAULT 0`: both store the same value, but
+    // Postgres renders the former as `'0'::numeric`, which is what TypeORM's
+    // own DDL produces. Matching it exactly means a later
+    // `migration:generate` sees no drift and does not propose an ALTER.
+    await queryRunner.query(`
+      ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "cashbackBalance" numeric(12,2) NOT NULL DEFAULT '0'
+    `);
+
+    // NOTE ON COLUMN ORDER: a column added by ALTER lands at the end of the
+    // table, so an upgraded database has `privyDid` last where a freshly built
+    // one has it mid-table. Postgres attaches no meaning to column order and
+    // nothing here selects by position, so this is cosmetic — but it is the
+    // one respect in which the two paths are not byte-identical, and it is
+    // better written down than rediscovered during a schema diff.
+
+    // A driver who signs in with Privy has no password at all. On a
+    // pre-existing database the column is still NOT NULL, so provisioning
+    // would fail on the insert rather than anywhere obvious.
+    await queryRunner.query(`
+      ALTER TABLE "drivers" ALTER COLUMN "password" DROP NOT NULL
+    `);
+
+    // --- de-duplicate before the unique indexes ---------------------------
+    //
+    // `CREATE UNIQUE INDEX IF NOT EXISTS` guards the index NAME, not the DATA.
+    // `uq_rating_ride_rater` is new, and the whole reason it exists is that
+    // duplicate ratings were previously possible — so a real database has rows
+    // that violate it. Creating it would raise 23505, roll the migration back,
+    // and fail the deploy with nothing applied.
+    //
+    // Keep the EARLIEST rating per (ride, rater): it is the one the rider
+    // actually meant, before any loop inflated an average.
+    await queryRunner.query(`
+      DELETE FROM "ratings" a
+      USING "ratings" b
+      WHERE a."rideId" = b."rideId"
+        AND a."raterId" = b."raterId"
+        AND (a."createdAt" > b."createdAt"
+             OR (a."createdAt" = b."createdAt" AND a."id" > b."id"))
+    `);
+
+    // Same hazard for the ledger's one-entry-per-(ride,type) rule. Here the
+    // earliest entry is authoritative too — a duplicate means a fare split was
+    // paid out twice, and the second one is the error.
+    await queryRunner.query(`
+      DELETE FROM "ledger_entries" a
+      USING "ledger_entries" b
+      WHERE a."rideId" IS NOT NULL
+        AND a."rideId" = b."rideId"
+        AND a."type" = b."type"
+        AND (a."createdAt" > b."createdAt"
+             OR (a."createdAt" = b."createdAt" AND a."id" > b."id"))
+    `);
+
     // --- primary keys and unique constraints ------------------------------
     await queryRunner.query(`
       DO $$ BEGIN

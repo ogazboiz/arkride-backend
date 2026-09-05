@@ -90,6 +90,37 @@ export class PrivyService {
   }
 
   /**
+   * The identity a VERIFIED identity token attests to: wallet and email.
+   *
+   * Both come from Privy's signed claims. Neither may come from the request
+   * body — see PrivyAuthService.signIn for the account-takeover this prevents.
+   */
+  async identityFrom(
+    token: string | null | undefined,
+  ): Promise<{ wallet: string | null; email: string | null }> {
+    if (!this.isConfigured || !token) return { wallet: null, email: null };
+
+    try {
+      const user = await verifyIdentityToken({
+        identity_token: token,
+        app_id: this.appId as string,
+        verification_key: this.verificationKey as string,
+      });
+      const accounts = (user as { linked_accounts?: unknown }).linked_accounts;
+      return {
+        wallet: walletFromLinkedAccounts(accounts),
+        email: emailFromLinkedAccounts(accounts),
+      };
+    } catch (error) {
+      this.logger.debug({
+        message: 'Privy identity token verification failed',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { wallet: null, email: null };
+    }
+  }
+
+  /**
    * The caller's embedded EVM wallet, read from a VERIFIED identity token.
    *
    * Null on any failure, deliberately not a throw: this runs alongside an
@@ -118,6 +149,40 @@ export class PrivyService {
       return null;
     }
   }
+}
+
+/**
+ * The VERIFIED email on a Privy identity, or null.
+ *
+ * This is the only email an account may be linked by. The request body cannot
+ * be trusted for it: a caller presenting their own valid Privy token could
+ * otherwise name somebody else's address and be handed that person's account.
+ *
+ * Lower-cased, because emails are compared and stored lower-cased everywhere
+ * else and a casing mismatch is a silent failure to match.
+ *
+ * Exported for the unit test.
+ */
+export function emailFromLinkedAccounts(claim: unknown): string | null {
+  let accounts: unknown = claim;
+  if (typeof accounts === 'string') {
+    try {
+      accounts = JSON.parse(accounts);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(accounts)) return null;
+
+  const email = (accounts as Array<{ type?: string; address?: string }>).find(
+    (account) =>
+      account &&
+      account.type === 'email' &&
+      typeof account.address === 'string' &&
+      account.address.includes('@'),
+  );
+
+  return email?.address ? email.address.trim().toLowerCase() : null;
 }
 
 /** Header Privy's client SDK sends the signed identity token in. */

@@ -34,10 +34,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionFilter');
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    // A websocket exception has no HTTP response to write to. Let the
-    // gateway's own error handling deal with it.
+    // A websocket exception has no HTTP response to write to.
+    //
+    // This used to `throw exception` — which is wrong, because this filter IS
+    // the gateway's error handling and there is nothing above it to catch. The
+    // rejection escaped the socket.io proxy, became an unhandled rejection,
+    // and on Node >= 15 that terminates the process. At best the client's ack
+    // never resolved and the socket hung with no explanation.
+    //
+    // Now: tell the client, log it, and let the process live.
     if (host.getType() !== 'http') {
-      throw exception;
+      this.handleWsException(exception, host);
+      return;
     }
 
     const ctx = host.switchToHttp();
@@ -83,6 +91,54 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     response.status(statusCode).json(body);
+  }
+
+  /**
+   * Report a failure on a websocket without taking the process down with it.
+   *
+   * The client gets the same `code`/`message` contract HTTP callers get, minus
+   * anything internal. A 5xx is logged with a request id and the client is
+   * told only that id.
+   */
+  private handleWsException(exception: unknown, host: ArgumentsHost): void {
+    const { statusCode, message, code } = describe(exception);
+
+    const isServerFault = statusCode >= HttpStatus.INTERNAL_SERVER_ERROR;
+    const requestId = isServerFault ? randomUUID() : undefined;
+
+    if (isServerFault) {
+      this.logger.error({
+        requestId,
+        transport: 'ws',
+        message,
+        stack: exception instanceof Error ? exception.stack : undefined,
+      });
+    } else {
+      this.logger.warn({ transport: 'ws', statusCode, code, message });
+    }
+
+    try {
+      const client = host.switchToWs().getClient<{
+        emit?: (event: string, payload: unknown) => void;
+      }>();
+      client?.emit?.('exception', {
+        success: false,
+        statusCode,
+        code,
+        message: isServerFault
+          ? 'Something went wrong on our side. Quote the request id when reporting this.'
+          : message,
+        ...(requestId ? { requestId } : {}),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (emitError) {
+      // A socket that has already gone away cannot be told anything. That is
+      // not a reason to crash either.
+      this.logger.debug({
+        message: 'Could not deliver a websocket error to the client',
+        error: emitError instanceof Error ? emitError.message : String(emitError),
+      });
+    }
   }
 }
 

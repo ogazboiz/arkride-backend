@@ -53,7 +53,7 @@ export class StatsService {
    * earnings, or anything that would let a competitor size the business.
    */
   async getPublicStats() {
-    const [completedRides, activeDrivers, riders, topPickups] =
+    const [completedRides, activeDrivers, riders, coverageAreas] =
       await Promise.all([
         this.rides.count({ where: { status: RideStatus.COMPLETED } }),
         this.drivers.count({
@@ -63,18 +63,36 @@ export class StatsService {
           },
         }),
         this.users.count(),
-        this.topLocations('pickup', 5),
+        this.distinctPickupAreas(),
       ]);
 
     return {
-      completedRides,
-      activeDrivers,
-      riders,
-      coverageAreas: topPickups.length,
-      topPickupLocations: topPickups,
+      // Rounded DOWN to a marketing figure, not reported exactly.
+      //
+      // The first version returned precise counts and the five most frequent
+      // pickup ADDRESSES. On a platform with modest volume those addresses are
+      // individual riders' homes — which is the opposite of this endpoint's
+      // own promise that nothing here identifies a person — and polling the
+      // exact counts daily hands a competitor the growth curve.
+      //
+      // A number a marketing page can print is all this needs to be.
+      completedRides: roundDownToMilestone(completedRides),
+      activeDrivers: roundDownToMilestone(activeDrivers),
+      riders: roundDownToMilestone(riders),
+      /** How many distinct areas are served. No addresses. */
+      coverageAreas,
       vehicleTypesOffered: Object.values(VehicleType),
       rideCategoriesOffered: Object.values(RideCategory),
     };
+  }
+
+  /** How many distinct pickup areas have ever been served. */
+  private async distinctPickupAreas(): Promise<number> {
+    const row = await this.rides
+      .createQueryBuilder('ride')
+      .select("COUNT(DISTINCT ride.pickup ->> 'address')", 'count')
+      .getRawOne<{ count: string }>();
+    return Number(row?.count ?? 0);
   }
 
   /** The admin landing page: the handful of numbers worth waking up to. */
@@ -706,6 +724,23 @@ export function money(value: string | number | null | undefined): number {
   const parsed = typeof value === 'string' ? Number(value) : (value ?? 0);
   if (!Number.isFinite(parsed)) return 0;
   return Math.round(parsed * 100) / 100;
+}
+
+/**
+ * Round down to a public-facing milestone.
+ *
+ * `1,247` on a marketing page is an exact business metric anyone can poll
+ * daily to derive a growth curve. `1,000+` says the same thing to a visitor
+ * and nothing to a competitor. Small numbers pass through unchanged, because
+ * rounding 7 down to 0 would be a lie in the other direction.
+ *
+ * Exported for the unit test.
+ */
+export function roundDownToMilestone(value: number): number {
+  if (value < 100) return value;
+  if (value < 1_000) return Math.floor(value / 100) * 100;
+  if (value < 10_000) return Math.floor(value / 1_000) * 1_000;
+  return Math.floor(value / 10_000) * 10_000;
 }
 
 /** A percentage to one decimal place, and 0 rather than NaN for an empty set. */

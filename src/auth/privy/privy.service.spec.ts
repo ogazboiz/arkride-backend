@@ -314,3 +314,59 @@ describe('PrivyService', () => {
     );
   });
 });
+
+describe('emailFromLinkedAccounts', () => {
+  // This function is the fix for an account takeover: the email used to link a
+  // Privy DID to an existing account must come from Privy's SIGNED claims,
+  // never from the request body.
+  const { emailFromLinkedAccounts } = require('./privy.service');
+
+  it('returns the verified email, lower-cased and trimmed', () => {
+    expect(
+      emailFromLinkedAccounts([
+        { type: 'email', address: '  Amina@Example.COM ' },
+      ]),
+    ).toBe('amina@example.com');
+  });
+
+  it('parses linked_accounts delivered as a JSON string', () => {
+    expect(
+      emailFromLinkedAccounts(
+        JSON.stringify([{ type: 'email', address: 'a@b.com' }]),
+      ),
+    ).toBe('a@b.com');
+  });
+
+  it('ignores a wallet account whose address is not an email', () => {
+    expect(
+      emailFromLinkedAccounts([
+        {
+          type: 'wallet',
+          chain_type: 'ethereum',
+          address: '0x1111111111111111111111111111111111111111',
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it('rejects a value with no @, however it is typed', () => {
+    expect(emailFromLinkedAccounts([{ type: 'email', address: 'nope' }])).toBeNull();
+  });
+
+  it.each([null, undefined, 42, {}, 'not json', '[', []])(
+    'returns null for %p',
+    (input) => {
+      expect(emailFromLinkedAccounts(input)).toBeNull();
+    },
+  );
+
+  it('takes the first email when several are linked', () => {
+    expect(
+      emailFromLinkedAccounts([
+        { type: 'phone', address: '+2348012345678' },
+        { type: 'email', address: 'first@b.com' },
+        { type: 'email', address: 'second@b.com' },
+      ]),
+    ).toBe('first@b.com');
+  });
+});
