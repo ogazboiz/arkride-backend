@@ -7,7 +7,6 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { CommonModule } from '../common/common.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { DecaneService } from './decane.service';
 import { AuthResolverService } from './services/auth-resolver.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/entities/user.entity';
@@ -32,7 +31,6 @@ import { PrivyAuthService } from './privy/privy-auth.service';
   providers: [
     AuthService,
     JwtStrategy,
-    DecaneService,
     AuthResolverService,
     PrivyService,
     PrivyAuthService,
@@ -46,7 +44,6 @@ import { PrivyAuthService } from './privy/privy-auth.service';
     // TokenModule re-exports JwtModule with it, which is what the websocket
     // gateway needs for handshake verification.
     TokenModule,
-    DecaneService,
     AuthResolverService,
     PrivyService,
   ],

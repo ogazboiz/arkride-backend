@@ -27,11 +27,35 @@ NestJS 11 · PostgreSQL (TypeORM) · Redis · BullMQ · Socket.IO · Privy
 
 ```bash
 pnpm install
-cp .env.example .env          # then fill it in — see below
-docker compose -f compose.local.yml up -d   # postgres + redis
-pnpm migration:run            # build the schema
+cp .env.example .env
+
+# Fill in the three generated values:
+openssl rand -base64 48   # -> JWT_SECRET      (required, min 32 chars)
+openssl rand -hex 32      # -> INTERNAL_API_KEY
+openssl rand -hex 24      # -> REDIS_PASSWORD  (the local stack will not start without it)
+
+# Copy PRIVY_APP_ID and PRIVY_VERIFICATION_KEY from
+#   wsws-monorepo/apps/market-square/.env
+# It is the same shared WorldStreet Privy application, deliberately.
+
+docker compose -f compose.local.yml --env-file .env up -d postgres redis
+pnpm migration:run
 pnpm start:dev
 ```
+
+> **Port note.** `.env.example` puts Postgres on **5433** and Redis on **6380**,
+> not the defaults. `compose.local.yml` publishes them on `${DATABASE_PORT}` and
+> `${REDIS_PORT}`, so one variable moves the container and the app together. If
+> you already run Postgres locally on 5432, it wins over Docker's binding for
+> `localhost` — and the app then silently connects to *your* database and fails
+> with `database "arkrides" does not exist`.
+
+`SENDGRID_API_KEY` and `SENDGRID_FROM_EMAIL` are the only values nobody can
+generate for you. Development boots without them (OTP and reset emails are
+dropped); staging and production **will not start** without them.
+
+`.env.staging.example` and `.env.main.example` cover the deployed environments —
+they list only what differs.
 
 Swagger is at `http://localhost:4010/api` in development.
 
@@ -129,7 +153,7 @@ through the naira ledger. The address is what KASH payouts will use.
 ### Email and password
 
 `POST /api/v1/auth/register` → `verify-otp` → `login`. Unchanged, and unaffected
-by Privy being unconfigured.
+by Privy being unconfigured. OTPs are six digits.
 
 ### Sessions
 

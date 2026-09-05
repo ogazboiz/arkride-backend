@@ -49,6 +49,8 @@ lerna-debug.log*
 # ...but the template MUST be committed. It is the only documentation of what
 # this service needs to boot, and `.env.*` above would otherwise swallow it.
 !.env.example
+!.env.staging.example
+!.env.main.example
 
 *.pem
 

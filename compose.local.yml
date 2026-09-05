@@ -7,7 +7,13 @@ services:
       context: ./
       target: production
     restart: unless-stopped
-    env_file: .env.staging
+    # Falls back to .env so a fresh clone can run `docker compose -f
+    # compose.local.yml up` without first inventing two more env files.
+    env_file:
+      - path: .env.staging
+        required: false
+      - path: .env
+        required: false
     ports:
       - '4010:4010'
     environment:
@@ -27,7 +33,11 @@ services:
       context: ./
       target: production
     restart: unless-stopped
-    env_file: .env.main
+    env_file:
+      - path: .env.main
+        required: false
+      - path: .env
+        required: false
     ports:
       - '4011:4010'
     environment: 
@@ -77,13 +87,23 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass redis_password_dev
+    container_name: arkrides-redis-local
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    # The password comes from the environment and must match REDIS_PASSWORD in
+    # the API's env file. It used to be the literal string `redis_password_dev`
+    # committed here, which meant either the app could not authenticate or
+    # everyone shared a password published in the repository.
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     ports:
-      - '6379:6379'
+      # Host port from REDIS_PORT so a Redis you already run does not collide.
+      - '${REDIS_PORT:-6379}:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', '--raw', 'incr', 'ping']
+      # Must authenticate, or the check fails against a password-protected
+      # server and the api services never start.
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG']
       interval: 10s
       timeout: 5s
       retries: 5

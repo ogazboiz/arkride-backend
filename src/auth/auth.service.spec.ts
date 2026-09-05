@@ -4,7 +4,6 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { EmailService } from '../common/services/email.service';
-import { DecaneService } from './decane.service';
 import { TokenService } from './services/token.service';
 import { DriversService } from '../drivers/drivers.service';
 import { Role } from '../common/enums/role.enum';
@@ -29,12 +28,6 @@ describe('AuthService', () => {
     sendForgotPasswordEmail: jest.fn(),
   };
 
-  const mockDecaneService = {
-    getUser: jest.fn(),
-    verifyAccessToken: jest.fn(),
-    safeVerifyAccessToken: jest.fn(),
-  };
-
   const mockTokenService = {
     rotate: jest.fn(),
     revokeByToken: jest.fn(),
@@ -51,7 +44,6 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: mockUsersService },
         { provide: JwtService, useValue: mockJwtService },
         { provide: EmailService, useValue: mockEmailService },
-        { provide: DecaneService, useValue: mockDecaneService },
         { provide: TokenService, useValue: mockTokenService },
         { provide: DriversService, useValue: mockDriversService },
       ],

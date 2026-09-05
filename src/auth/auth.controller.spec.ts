@@ -14,7 +14,6 @@ describe('AuthController', () => {
     resendOtp: jest.fn(),
     forgotPassword: jest.fn(),
     resetPassword: jest.fn(),
-    authenticateWithDecane: jest.fn(),
     refreshSession: jest.fn(),
     logout: jest.fn(),
   };

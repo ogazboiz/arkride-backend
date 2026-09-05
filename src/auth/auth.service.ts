@@ -10,8 +10,6 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { DecaneAuthDto } from './dto/decane-auth.dto';
-import { DecaneService } from './decane.service';
 import { TokenService } from './services/token.service';
 import { DriversService } from '../drivers/drivers.service';
 import { Role } from '../common/enums/role.enum';
@@ -23,7 +21,6 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
-    private readonly decaneService: DecaneService,
     private readonly tokenService: TokenService,
     private readonly driversService: DriversService,
   ) {}
@@ -280,64 +277,6 @@ export class AuthService {
     };
   }
 
-  async authenticateWithDecane(dto: DecaneAuthDto) {
-    // 1. Verify token and resolve Decane user details (UUID and multi-chain wallet addresses)
-    const decaneUser = await this.decaneService.getUser(dto.token);
-    const decaneUserId = decaneUser.id; // stable UUID
-
-    // 2. Check if user already exists with this Decane provider ID
-    let user = await this.usersService.findByProvider('decane', decaneUserId);
-
-    if (!user) {
-      // Determine email to use
-      const emailToUse = dto.email || `${decaneUserId}@decane.user`;
-
-      // Check if user with that email already exists
-      const existingByEmail = await this.usersService.findByEmail(emailToUse);
-      if (existingByEmail) {
-        user = existingByEmail;
-        user.provider = 'decane';
-        user.providerId = decaneUserId;
-      } else {
-        user = await this.usersService.createUser({
-          name: dto.name || `User_${decaneUserId.slice(0, 8)}`,
-          email: emailToUse,
-          phone: null,
-          password: null,
-          provider: 'decane',
-          providerId: decaneUserId,
-          isVerified: true,
-          otpCode: null,
-          otpExpiry: null,
-          walletAddressEvm: decaneUser.addresses?.evm || null,
-          walletAddressSolana: decaneUser.addresses?.solana || null,
-          walletAddressTron: decaneUser.addresses?.tron || null,
-        });
-      }
-    }
-
-    // Always update/sync latest wallet addresses if resolved
-    if (decaneUser.addresses) {
-      await this.usersService.updateWalletAddresses(user.id, decaneUser.addresses);
-      user.walletAddressEvm = decaneUser.addresses.evm ?? user.walletAddressEvm;
-      user.walletAddressSolana = decaneUser.addresses.solana ?? user.walletAddressSolana;
-      user.walletAddressTron = decaneUser.addresses.tron ?? user.walletAddressTron;
-    }
-
-    // 3. Issue application JWT
-    const session = await this.issueSession(user);
-
-    return {
-      message: 'Decane authentication successful',
-      user: this.sanitizeUser(user),
-      decane: {
-        userId: decaneUserId,
-        addresses: decaneUser.addresses,
-        linkedAccounts: decaneUser.linkedAccounts,
-      },
-      ...session,
-    };
-  }
 
   /**
    * Issue a full session for a rider: short access token PLUS a refresh token.
