@@ -1,8 +1,10 @@
 import {
+  IsDateString,
   IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -61,6 +63,81 @@ export class PrivySignInDto {
   // The email used for linking now comes from Privy's SIGNED identity token
   // (send it as `identityToken`, or as the `privy-id-token` header). Do not
   // reintroduce this field.
+}
+
+/**
+ * Provision a driver from a verified Privy identity plus the details the driver
+ * app collects. Like {@link PrivySignInDto} there is deliberately NO `email` —
+ * the address is read only from the SIGNED Privy token, never this body.
+ */
+export class PrivyDriverRegisterDto {
+  @ApiProperty({
+    description: "Privy access token from the client SDK's getAccessToken().",
+  })
+  @IsNotEmpty({ message: 'A Privy access token is required' })
+  @IsString()
+  accessToken!: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Privy identity token (the client's privy-id-token). Verified " +
+      'server-side; supplies the verified email and embedded wallet.',
+  })
+  @IsOptional()
+  @IsString()
+  identityToken?: string;
+
+  @ApiProperty({ example: 'Amina Yusuf' })
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(120)
+  name!: string;
+
+  @ApiProperty({
+    example: '+2348012345678',
+    description: 'Valid Nigerian phone number',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @Matches(/^(\+234|0)[789]\d{9}$/, {
+    message: 'Phone number must be a valid Nigerian phone number',
+  })
+  phone!: string;
+
+  @ApiProperty({ example: 'LAG-DRV-2025-001' })
+  @IsNotEmpty()
+  @IsString()
+  licenseNumber!: string;
+
+  @ApiProperty({ example: '2028-12-31', description: 'ISO date string' })
+  @IsNotEmpty()
+  @IsDateString()
+  licenseExpiry!: string;
+
+  @ApiProperty({ example: 'car', enum: ['keke', 'bike', 'car', 'courier'] })
+  @IsNotEmpty()
+  @IsString()
+  vehicleType!: string;
+
+  @ApiProperty({ example: 'ABC-123XY' })
+  @IsNotEmpty()
+  @IsString()
+  plateNumber!: string;
+
+  @ApiProperty({ example: 'Yellow' })
+  @IsNotEmpty()
+  @IsString()
+  vehicleColor!: string;
+
+  @ApiProperty({ example: 'Toyota Corolla' })
+  @IsNotEmpty()
+  @IsString()
+  vehicleModel!: string;
+
+  @ApiProperty({ example: '2024' })
+  @IsNotEmpty()
+  @IsString()
+  vehicleYear!: string;
 }
 
 export class RefreshSessionDto {

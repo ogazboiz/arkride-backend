@@ -9,7 +9,11 @@ import {
 import { AuthService } from './auth.service';
 import { PrivyAuthService } from './privy/privy-auth.service';
 import { PRIVY_IDENTITY_HEADER } from './privy/privy.service';
-import { PrivySignInDto, RefreshSessionDto } from './dto/privy-auth.dto';
+import {
+  PrivySignInDto,
+  PrivyDriverRegisterDto,
+  RefreshSessionDto,
+} from './dto/privy-auth.dto';
 import type { Request } from 'express';
 import { RegisterDto } from './dto/register.dto';
 // import { GoogleAuthDto } from './dto/google-auth.dto';
@@ -164,6 +168,50 @@ export class AuthController {
       userAgent: req.header('user-agent') ?? null,
       ipAddress: req.ip ?? null,
     });
+  }
+
+  /**
+   * Provision a new driver from a verified Privy identity + collected details.
+   *
+   * Sign-in (`POST /auth/privy` with audience "driver") refuses an unknown DID
+   * with `code: DRIVER_NOT_REGISTERED`; the driver app then collects licence
+   * and vehicle details and calls this to create the account. Idempotent: an
+   * already-linked driver is simply signed in.
+   */
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 10, ttl: 60_000 },
+  })
+  @Post('privy/driver-register')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Register a driver with a Privy access token' })
+  @ApiBody({ type: PrivyDriverRegisterDto })
+  @ApiOkResponse({ description: 'Driver provisioned and session issued.' })
+  async privyDriverRegister(
+    @Body() dto: PrivyDriverRegisterDto,
+    @Req() req: Request,
+  ) {
+    return this.privyAuthService.registerDriver(
+      {
+        accessToken: dto.accessToken,
+        identityToken:
+          dto.identityToken ?? req.header(PRIVY_IDENTITY_HEADER) ?? null,
+        audience: 'driver',
+        userAgent: req.header('user-agent') ?? null,
+        ipAddress: req.ip ?? null,
+      },
+      {
+        name: dto.name,
+        phone: dto.phone,
+        licenseNumber: dto.licenseNumber,
+        licenseExpiry: dto.licenseExpiry,
+        vehicleType: dto.vehicleType,
+        plateNumber: dto.plateNumber,
+        vehicleColor: dto.vehicleColor,
+        vehicleModel: dto.vehicleModel,
+        vehicleYear: dto.vehicleYear,
+      },
+    );
   }
 
   /**

@@ -12,6 +12,7 @@ import { PrivyService } from './privy.service';
 import { TokenService, SessionTokens } from '../services/token.service';
 import { User } from '../../users/entities/user.entity';
 import { Driver } from '../../drivers/entities/driver.entity';
+import { DriversService } from '../../drivers/drivers.service';
 import { Role } from '../../common/enums/role.enum';
 
 /** Which side of the platform the caller is signing in as. */
@@ -32,6 +33,23 @@ export interface PrivySignInInput {
   name?: string;
   userAgent?: string | null;
   ipAddress?: string | null;
+}
+
+/**
+ * The driver-supplied fields needed to provision a driver, alongside the
+ * verified Privy identity. Email and wallet are NOT here — they come only from
+ * the signed token.
+ */
+export interface DriverRegistrationDetails {
+  name: string;
+  phone: string;
+  licenseNumber: string;
+  licenseExpiry: string;
+  vehicleType: string;
+  plateNumber: string;
+  vehicleColor: string;
+  vehicleModel: string;
+  vehicleYear: string | number;
 }
 
 export interface PrivySignInResult extends SessionTokens {
@@ -85,6 +103,7 @@ export class PrivyAuthService {
     private readonly tokens: TokenService,
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(Driver) private readonly drivers: Repository<Driver>,
+    private readonly driversService: DriversService,
   ) {}
 
   async signIn(input: PrivySignInInput): Promise<PrivySignInResult> {
@@ -216,22 +235,96 @@ export class PrivyAuthService {
   }
 
   /**
-   * Drivers are NOT provisioned here.
+   * Sign in an EXISTING driver.
    *
-   * A driver account implies a licence, a vehicle and an admin approval.
-   * Minting one from a social login would create an unverified driver, and the
-   * "only approved drivers can go online" rule would then be the only thing
-   * standing between that account and carrying a passenger.
+   * Provisioning is a separate, explicit step (`registerDriver`): a driver
+   * account implies a licence, a vehicle and — normally — an admin approval,
+   * so an unknown DID asking for a driver session is told to register rather
+   * than being handed a driver account by a social login alone.
    */
   private async signInDriver(
     did: string,
     identity: PrivyIdentity,
     input: PrivySignInInput,
   ): Promise<PrivySignInResult> {
-    let driver = await this.drivers.findOne({ where: { privyDid: did } });
+    const driver = await this.findLinkedDriver(did, identity);
+
+    if (!driver) {
+      // Coded so the driver app can tell "you need to register" apart from a
+      // real failure and route to the details form, rather than surfacing this
+      // as an error. The exception filter propagates `code` from the response
+      // object (see all-exceptions.filter.ts).
+      throw new BadRequestException({
+        message:
+          'No driver account is linked to this Privy identity. ' +
+          'Complete driver registration to continue.',
+        code: 'DRIVER_NOT_REGISTERED',
+      });
+    }
+
+    return this.issueDriverSession(driver, did, identity, input, false);
+  }
+
+  /**
+   * Provision a brand-new driver from a verified Privy identity plus the
+   * details the driver app collects (licence, vehicle, …). Idempotent: if a
+   * driver is already linked to this DID or verified email, sign them in
+   * instead of creating a duplicate.
+   *
+   * Email/wallet come from the SIGNED token, never the body — the same
+   * takeover protection as rider provisioning (see signInRider).
+   */
+  async registerDriver(
+    input: PrivySignInInput,
+    details: DriverRegistrationDetails,
+  ): Promise<PrivySignInResult> {
+    if (!this.privy.isConfigured) {
+      throw new ServiceUnavailableException(
+        'Privy sign-in is not configured on this server.',
+      );
+    }
+
+    const did = await this.privy.verifyAccessToken(input.accessToken);
+    if (!did) {
+      throw new UnauthorizedException('Invalid Privy access token.');
+    }
+    const identity = await this.privy.identityFrom(input.identityToken);
+
+    const existing = await this.findLinkedDriver(did, identity);
+    if (existing) {
+      return this.issueDriverSession(existing, did, identity, input, false);
+    }
+
+    const created = await this.driversService.createFromPrivy({
+      did,
+      email: identity.email,
+      walletAddressEvm: identity.wallet,
+      details,
+    });
+
+    this.logger.log({
+      message: 'Provisioned a driver from Privy',
+      driverId: created.id,
+      verificationStatus: created.verificationStatus,
+    });
+
+    return this.issueDriverSession(created, did, identity, input, true);
+  }
+
+  /**
+   * Find the driver linked to this DID, linking by verified email on first
+   * sign-in. Returns null when there is no such driver. Refuses to re-point an
+   * email that already belongs to a different DID.
+   */
+  private async findLinkedDriver(
+    did: string,
+    identity: PrivyIdentity,
+  ): Promise<Driver | null> {
+    const byDid = await this.drivers.findOne({ where: { privyDid: did } });
+    if (byDid) return byDid;
 
     // Verified email only — see signInRider for the takeover this prevents.
-    if (!driver && identity.email) {
+    if (identity.email) {
       const byEmail = await this.drivers.findOne({
         where: { email: identity.email },
       });
@@ -242,17 +335,21 @@ export class PrivyAuthService {
           );
         }
         byEmail.privyDid = did;
-        driver = byEmail;
+        return byEmail;
       }
     }
 
-    if (!driver) {
-      throw new BadRequestException(
-        'No driver account is linked to this Privy identity. ' +
-          'Register as a driver first, then link Privy from your profile.',
-      );
-    }
+    return null;
+  }
 
+  /** Sync the wallet, persist, and issue a driver session. */
+  private async issueDriverSession(
+    driver: Driver,
+    did: string,
+    identity: PrivyIdentity,
+    input: PrivySignInInput,
+    isNewAccount: boolean,
+  ): Promise<PrivySignInResult> {
     if (!driver.isActive) {
       throw new ForbiddenException('Your driver account has been deactivated.');
     }
@@ -271,15 +368,17 @@ export class PrivyAuthService {
       { userAgent: input.userAgent, ipAddress: input.ipAddress },
     );
 
-    this.logger.log({
-      message: 'Driver signed in with Privy',
-      driverId: saved.id,
-      verificationStatus: saved.verificationStatus,
-    });
+    if (!isNewAccount) {
+      this.logger.log({
+        message: 'Driver signed in with Privy',
+        driverId: saved.id,
+        verificationStatus: saved.verificationStatus,
+      });
+    }
 
     return {
       ...tokens,
-      isNewAccount: false,
+      isNewAccount,
       profile: {
         id: saved.id,
         name: saved.name,
