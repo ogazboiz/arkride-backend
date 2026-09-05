@@ -30,6 +30,50 @@ Set these on the **API** service. Railway exposes the database services'
 credentials as variable references — use those rather than pasting values, so
 a rotated password does not silently break the API.
 
+### Copy-paste block
+
+Railway's Variables tab has a **Raw Editor**. Paste this in, then replace the
+two placeholders and generate your own secrets — do not ship the ones below,
+they are illustrative.
+
+```env
+NODE_ENV=production
+JWT_SECRET=<openssl rand -base64 48>
+INTERNAL_API_KEY=<openssl rand -base64 32>
+
+DATABASE_HOST=${{Postgres.PGHOST}}
+DATABASE_PORT=${{Postgres.PGPORT}}
+DATABASE_USERNAME=${{Postgres.PGUSER}}
+DATABASE_PASSWORD=${{Postgres.PGPASSWORD}}
+DATABASE_NAME=${{Postgres.PGDATABASE}}
+DATABASE_SSL=true
+
+REDIS_HOST=${{Redis.REDISHOST}}
+REDIS_PORT=${{Redis.REDISPORT}}
+REDIS_PASSWORD=${{Redis.REDISPASSWORD}}
+
+PRIVY_APP_ID=<your Privy app id>
+PRIVY_VERIFICATION_KEY=<the public verification key, newlines escaped as \n>
+
+APP_NAME=Ark Rides
+KEKE_WEBSITE_URL=https://arkrides.com
+REPORTING_TIMEZONE=Africa/Lagos
+CORS_ORIGINS=<your web app's public URL>
+
+SENDGRID_API_KEY=<required — the app will not boot without it>
+SENDGRID_FROM_EMAIL=<a verified sender on your SendGrid account>
+```
+
+The `${{Postgres.*}}` and `${{Redis.*}}` forms are Railway variable references,
+resolved at deploy time from the database services in the same project. Use
+them rather than pasting values: a rotated password then flows through instead
+of silently breaking the API.
+
+**Setting `NODE_ENV=production` alone is not enough.** That switch is what
+*turns on* the other requirements — `INTERNAL_API_KEY`, `REDIS_HOST` and both
+SendGrid variables are only enforced outside development. A deploy with just
+`NODE_ENV` changed will crash-loop with a list of what is missing.
+
 ### Required — the app will not start without these
 
 | Variable | Value |
