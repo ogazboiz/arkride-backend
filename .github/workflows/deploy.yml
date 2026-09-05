@@ -72,7 +72,7 @@ jobs:
 
             IMAGE_TAG=$IMAGE_TAG docker compose up -d
 
-            docker compose exec -T api npm run migration:run
+            docker compose exec -T api pnpm run migration:run:prod
 
       - name: Deploy to Digital Ocean (Main)
         if: github.ref == 'refs/heads/main'
@@ -103,4 +103,4 @@ jobs:
 
             IMAGE_TAG=$IMAGE_TAG docker compose up -d
 
-            docker compose exec -T api npm run migration:run
+            docker compose exec -T api pnpm run migration:run:prod

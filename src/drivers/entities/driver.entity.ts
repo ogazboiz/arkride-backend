@@ -32,8 +32,13 @@ export class Driver {
   @Column({ unique: true })
   email: string;
 
-  @Column()
-  password: string;
+  /**
+   * Nullable: a driver who signed up with Privy has no password at all.
+   * The login path refuses an account with no password rather than comparing
+   * against null.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  password: string | null;
 
   @Column({ unique: true })
   licenseNumber: string;
@@ -76,6 +81,38 @@ export class Driver {
    * Stored when driver requests password reset
    * Cleared after successful password reset
    */
+  /**
+   * The Privy DID that owns this account, e.g. `did:privy:cm...`.
+   *
+   * Ark Rides shares one Privy application with the rest of WorldStreet, so
+   * this is the same identity a rider already uses on Market Square — one
+   * WorldStreet account across products.
+   *
+   * NULLABLE because email/password accounts predate it and still work; UNIQUE
+   * because a DID must resolve to exactly one row. Postgres allows any number
+   * of NULLs under a unique constraint, so legacy rows do not collide.
+   *
+   * Note that `users` and `drivers` are separate tables with separate id
+   * spaces. The SAME DID may appear once in each — a person who rides and also
+   * drives is one human with two accounts here, which is the existing model;
+   * linking Privy does not change it. Which row a token resolves to is decided
+   * at sign-in, not guessed per request.
+   */
+  @Column({ type: 'varchar', unique: true, nullable: true })
+  privyDid: string | null;
+
+  /**
+   * The driver's embedded EVM wallet, read from a VERIFIED Privy identity
+   * token — never from a client-supplied header, which on a public API would
+   * let anyone claim any address and redirect a payout.
+   *
+   * Recorded, not yet settled against: earnings still move through the naira
+   * ledger. This is the address KASH payouts will use when that lands, and
+   * capturing it now means the data is already there.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  walletAddressEvm: string | null;
+
   @Column({ type: 'varchar', nullable: true })
   otpCode: string | null;
 

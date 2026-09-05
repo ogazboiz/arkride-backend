@@ -11,9 +11,17 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { DecaneService } from './decane.service';
 import { AuthResolverService } from './services/auth-resolver.service';
 import { jwtModuleOptions } from '../config/jwt.config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { User } from '../users/entities/user.entity';
+import { Driver } from '../drivers/entities/driver.entity';
+import { TokenService } from './services/token.service';
+import { PrivyService } from './privy/privy.service';
+import { PrivyAuthService } from './privy/privy-auth.service';
 
 @Module({
-  imports: [ 
+  imports: [
+    TypeOrmModule.forFeature([RefreshToken, User, Driver]),
     UsersModule, 
     DriversModule,
     PassportModule, 
@@ -25,9 +33,24 @@ import { jwtModuleOptions } from '../config/jwt.config';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, DecaneService, AuthResolverService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    DecaneService,
+    AuthResolverService,
+    TokenService,
+    PrivyService,
+    PrivyAuthService,
+  ],
   // AuthResolverService is exported for the websocket gateway, which must
   // resolve socket handshake tokens exactly the way HTTP requests do.
-  exports: [AuthService, JwtModule, DecaneService, AuthResolverService],
+  exports: [
+    AuthService,
+    JwtModule,
+    DecaneService,
+    AuthResolverService,
+    TokenService,
+    PrivyService,
+  ],
 })
 export class AuthModule {}

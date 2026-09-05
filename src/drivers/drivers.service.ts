@@ -132,6 +132,17 @@ export class DriversService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // A driver who signed up through Privy has no password. Say so plainly
+    // rather than returning "invalid credentials" — they would otherwise sit
+    // there retrying a password that does not exist. This reveals nothing an
+    // attacker can use: they already had to know a registered email, and the
+    // remedy it points at (sign in with Privy) is the public sign-in method.
+    if (!driver.password) {
+      throw new UnauthorizedException(
+        'This account signs in with Privy. Use Privy sign-in instead of a password.',
+      );
+    }
+
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
       driver.password,

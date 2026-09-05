@@ -7,12 +7,14 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
+//the ask function
 const ask = (query: string): Promise<string> =>
   new Promise((resolve) => rl.question(query, resolve));
 
+//the main function
 async function main() {
   console.log('\n=================================================');
-  console.log('       Decane Backend Integration Test CLI        ');
+  console.log('       Decane Backend Integration Test CLI      ');
   console.log('=================================================\n');
 
   const appId = process.env.DECANE_APP_ID;

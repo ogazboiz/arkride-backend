@@ -12,8 +12,10 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { DecaneAuthDto } from './dto/decane-auth.dto';
 import { DecaneService } from './decane.service';
-import { User } from '../users/entities/user.entity';
+import { TokenService } from './services/token.service';
+import { DriversService } from '../drivers/drivers.service';
 import { Role } from '../common/enums/role.enum';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class AuthService {
@@ -22,7 +24,43 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly decaneService: DecaneService,
+    private readonly tokenService: TokenService,
+    private readonly driversService: DriversService,
   ) {}
+
+  /**
+   * Exchange a refresh token for a new session.
+   *
+   * The subject is re-read from the database on every refresh rather than
+   * trusted from the token. That is what makes a block or a suspension take
+   * effect within the access-token lifetime instead of at the end of the
+   * 30-day refresh window.
+   */
+  async refreshSession(
+    refreshToken: string,
+    context: { userAgent?: string | null; ipAddress?: string | null } = {},
+  ) {
+    return this.tokenService.rotate(
+      refreshToken,
+      async (subjectId, subjectType) => {
+        if (subjectType === Role.DRIVER) {
+          const driver = await this.driversService.findForAuth(subjectId);
+          if (!driver || !driver.isActive) return null;
+          return { id: driver.id, role: Role.DRIVER, isDriver: true };
+        }
+
+        const user = await this.usersService.findById(subjectId);
+        if (!user || user.isBlocked) return null;
+        return { id: user.id, role: user.role, isDriver: false };
+      },
+      context,
+    );
+  }
+
+  /** End a session. Idempotent — see AuthController.logout for why. */
+  async logout(refreshToken: string): Promise<void> {
+    await this.tokenService.revokeByToken(refreshToken);
+  }
 
   async register(dto: RegisterDto) {
     // Validate terms acceptance

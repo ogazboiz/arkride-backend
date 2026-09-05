@@ -1,5 +1,16 @@
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { AuthService } from './auth.service'
+import {
+  Controller,
+  Post,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Req,
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { PrivyAuthService } from './privy/privy-auth.service';
+import { PRIVY_IDENTITY_HEADER } from './privy/privy.service';
+import { PrivySignInDto, RefreshSessionDto } from './dto/privy-auth.dto';
+import type { Request } from 'express';
 import { RegisterDto } from './dto/register.dto';
 // import { GoogleAuthDto } from './dto/google-auth.dto';
 import { LoginDto } from './dto/login.dto'
@@ -15,7 +26,10 @@ import { ApiBadRequestResponse, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiO
 @ApiTags('Auth')
 @Controller('api/v1/auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(
+    private readonly authService: AuthService,
+    private readonly privyAuthService: PrivyAuthService,
+  ) {}
 
   @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
   @Post('register')
@@ -81,6 +95,80 @@ export class AuthController {
   @ApiBadRequestResponse({ description: 'Invalid reset payload or OTP.' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  /**
+   * Sign in with Privy.
+   *
+   * Ark Rides shares one Privy application with the rest of WorldStreet, so a
+   * rider who already has a WorldStreet identity signs in with it here.
+   *
+   * The client presents Privy's ACCESS token (who they are) and, optionally,
+   * its IDENTITY token (what wallet they hold). Both are verified server-side
+   * against the app's public key — the wallet in particular must never come
+   * from a plain header, because this API is public and a header would let
+   * anyone claim any address.
+   *
+   * Returns an Ark Rides session, not a Privy one: every guard, role and the
+   * websocket handshake already speak the internal token, and exchanging once
+   * at the door is far less surface than teaching all of them a second
+   * credential format.
+   */
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 10, ttl: 60_000 } })
+  @Post('privy')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sign in with a Privy access token' })
+  @ApiBody({ type: PrivySignInDto })
+  @ApiOkResponse({ description: 'Session issued.' })
+  async privySignIn(@Body() dto: PrivySignInDto, @Req() req: Request) {
+    return this.privyAuthService.signIn({
+      accessToken: dto.accessToken,
+      // Accepted in the body OR the standard header, because Privy's own web
+      // SDK sets the header and its React Native SDK does not.
+      identityToken:
+        dto.identityToken ?? req.header(PRIVY_IDENTITY_HEADER) ?? null,
+      audience: dto.audience,
+      name: dto.name,
+      email: dto.email,
+      userAgent: req.header('user-agent') ?? null,
+      ipAddress: req.ip ?? null,
+    });
+  }
+
+  /**
+   * Exchange a refresh token for a new session.
+   *
+   * The presented token is CONSUMED — every refresh rotates. See
+   * RefreshToken for what happens when an already-consumed token turns up.
+   */
+  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 30, ttl: 60_000 } })
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange a refresh token for a new session' })
+  @ApiBody({ type: RefreshSessionDto })
+  @ApiOkResponse({ description: 'New session issued.' })
+  async refresh(@Body() dto: RefreshSessionDto, @Req() req: Request) {
+    return this.authService.refreshSession(dto.refreshToken, {
+      userAgent: req.header('user-agent') ?? null,
+      ipAddress: req.ip ?? null,
+    });
+  }
+
+  /**
+   * End a session.
+   *
+   * There was no logout at all before this — access tokens lasted seven days
+   * with no jti and no denylist, so nothing could end a session early.
+   * Deliberately idempotent and unauthenticated: it takes the refresh token
+   * itself as proof, so a client whose access token has already expired can
+   * still sign out.
+   */
+  @Post('logout')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Revoke a session' })
+  @ApiBody({ type: RefreshSessionDto })
+  async logout(@Body() dto: RefreshSessionDto): Promise<void> {
+    await this.authService.logout(dto.refreshToken);
   }
 
   @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })

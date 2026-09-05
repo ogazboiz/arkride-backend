@@ -33,6 +33,26 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   providerId: string | null;
 
+  /**
+   * The Privy DID that owns this account, e.g. `did:privy:cm...`.
+   *
+   * Ark Rides shares one Privy application with the rest of WorldStreet, so
+   * this is the same identity a rider already uses on Market Square — one
+   * WorldStreet account across products.
+   *
+   * NULLABLE because email/password accounts predate it and still work; UNIQUE
+   * because a DID must resolve to exactly one row. Postgres allows any number
+   * of NULLs under a unique constraint, so legacy rows do not collide.
+   *
+   * Note that `users` and `drivers` are separate tables with separate id
+   * spaces. The SAME DID may appear once in each — a person who rides and also
+   * drives is one human with two accounts here, which is the existing model;
+   * linking Privy does not change it. Which row a token resolves to is decided
+   * at sign-in, not guessed per request.
+   */
+  @Column({ type: 'varchar', unique: true, nullable: true })
+  privyDid: string | null;
+
   @Column({ type: 'varchar', nullable: true })
   walletAddressEvm: string | null;
 
