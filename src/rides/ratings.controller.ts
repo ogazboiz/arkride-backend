@@ -20,10 +20,10 @@ import { assertPartyToRide } from '../common/utils/ownership.util';
 import type { Principal } from '../common/utils/ownership.util';
 import {
   ApiBearerAuth,
+  ApiCreatedResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
-  ApiOkResponse,
 } from '@nestjs/swagger';
 
 @ApiTags('Ratings')
@@ -44,7 +44,7 @@ export class RatingsController {
   @Roles(Role.USER, Role.DRIVER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Submit a rating for a completed ride' })
-  @ApiOkResponse({ description: 'Rating recorded.' })
+  @ApiCreatedResponse({ description: 'Rating recorded.' })
   async create(
     @CurrentUser() principal: Principal,
     @Body() createRatingDto: CreateRatingDto,

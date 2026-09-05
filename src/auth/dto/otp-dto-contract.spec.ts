@@ -38,10 +38,10 @@ async function otpErrors(
   otp: unknown,
 ): Promise<string[]> {
   const instance = plainToInstance(Dto, { ...base, otp });
-  const errors = await validate(instance as object);
-  return errors.filter((e) => e.property === 'otp').flatMap((e) =>
-    Object.values(e.constraints ?? {}),
-  );
+  const errors = await validate(instance);
+  return errors
+    .filter((e) => e.property === 'otp')
+    .flatMap((e) => Object.values(e.constraints ?? {}));
 }
 
 describe.each(DTOS)('%s otp field', (_name, Dto, base) => {

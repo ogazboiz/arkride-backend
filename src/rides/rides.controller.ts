@@ -14,7 +14,7 @@ import { RidesService } from './rides.service';
 import { CreateRideDto } from './dto/create-ride.dto';
 import { CancelRideDto } from './dto/cancel-ride.dto';
 import { UpdateRideStatusDto } from './dto/update-ride-status.dto';
-import { EstimateRideDto, EstimateResponseDto } from './dto/estimate-ride.dto';
+import { EstimateRideDto, RideOptionDto } from './dto/estimate-ride.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -29,6 +29,7 @@ import { enveloped, listMeta } from '../common/dto/api-response';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -70,8 +71,8 @@ export class RidesController {
   @ApiOperation({ summary: 'Get ride price estimates' })
   @ApiBody({ type: EstimateRideDto })
   @ApiOkResponse({
-    description: 'Estimates calculated successfully.',
-    type: EstimateResponseDto,
+    description: 'Fare estimates for every category.',
+    type: [RideOptionDto],
   })
   async estimateRide(@Body() estimateDto: EstimateRideDto) {
     const estimates = await this.ridesService.estimateRide(estimateDto);
@@ -91,7 +92,7 @@ export class RidesController {
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Request a new ride' })
   @ApiBody({ type: CreateRideDto })
-  @ApiOkResponse({ description: 'Ride requested successfully.' })
+  @ApiCreatedResponse({ description: 'Ride requested successfully.' })
   async createRide(
     @Body() createRideDto: CreateRideDto,
     @CurrentUser() principal: Principal,
@@ -127,6 +128,8 @@ export class RidesController {
    * @returns Array of user's rides
    */
   @Get('user/:userId')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "List a rider's own ride history" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN)
   async getUserRides(
@@ -150,6 +153,8 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/cancel/user')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Cancel a ride as the rider' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER)
   async cancelRideByUser(
@@ -172,6 +177,11 @@ export class RidesController {
    * @returns Array of rides with status 'requested'
    */
   @Get('available')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary:
+      "List rides waiting for a driver, matched to the caller's vehicles",
+  })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async getAvailableRides(@CurrentUser() principal: Principal) {
@@ -189,6 +199,8 @@ export class RidesController {
    * @returns Array of driver's rides
    */
   @Get('driver/:driverId')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "List a driver's own ride history" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
   async getDriverRides(
@@ -208,6 +220,8 @@ export class RidesController {
    * @returns Updated ride with driver and vehicle info
    */
   @Patch(':id/accept')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Accept a requested ride' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async acceptRide(
@@ -229,6 +243,8 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/arrived')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Mark arrival at the pickup point' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async markArrived(
@@ -249,6 +265,8 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/start')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Start the trip' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async startRide(
@@ -269,6 +287,8 @@ export class RidesController {
    * @returns Updated ride with final fare
    */
   @Patch(':id/complete')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Complete the trip and settle the fare' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async completeRide(
@@ -291,6 +311,8 @@ export class RidesController {
    * @returns Updated ride
    */
   @Patch(':id/cancel/driver')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Cancel an accepted ride as the driver' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async cancelRideByDriver(
@@ -318,6 +340,8 @@ export class RidesController {
    * @returns Array of all rides
    */
   @Get()
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'List every ride (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async getAllRides() {
@@ -354,6 +378,8 @@ export class RidesController {
    * @returns Ride details with user, driver, and vehicle info
    */
   @Get(':id')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get one ride (must be a party to it)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DRIVER, Role.ADMIN)
   async getRide(@Param('id') id: string, @CurrentUser() principal: Principal) {

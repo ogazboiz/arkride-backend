@@ -25,6 +25,7 @@ import type { Principal } from '../common/utils/ownership.util';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -62,7 +63,7 @@ export class VehiclesController {
   @ApiBearerAuth('bearer')
   @ApiOperation({ summary: 'Create vehicle for a driver' })
   @ApiBody({ type: CreateVehicleDto })
-  @ApiOkResponse({ description: 'Vehicle created successfully.' })
+  @ApiCreatedResponse({ description: 'Vehicle created successfully.' })
   async create(
     @Body() createVehicleDto: CreateVehicleDto,
     @CurrentUser() principal: Principal,
@@ -132,10 +133,7 @@ export class VehiclesController {
   @ApiOperation({ summary: 'Get vehicle by ID' })
   @ApiParam({ name: 'id', description: 'Vehicle UUID' })
   @ApiOkResponse({ description: 'Vehicle fetched successfully.' })
-  async findOne(
-    @Param('id') id: string,
-    @CurrentUser() principal: Principal,
-  ) {
+  async findOne(@Param('id') id: string, @CurrentUser() principal: Principal) {
     const vehicle = await this.vehiclesService.findOne(id);
     assertOwnership(principal, vehicle.driverId, 'view your own vehicles');
     return vehicle;
@@ -163,10 +161,7 @@ export class VehiclesController {
   @ApiOperation({ summary: 'Activate a vehicle' })
   @ApiParam({ name: 'id', description: 'Vehicle UUID' })
   @ApiOkResponse({ description: 'Vehicle activated successfully.' })
-  async activate(
-    @Param('id') id: string,
-    @CurrentUser() principal: Principal,
-  ) {
+  async activate(@Param('id') id: string, @CurrentUser() principal: Principal) {
     await this.assertOwnsVehicle(principal, id, 'activate your own vehicles');
     const vehicle = await this.vehiclesService.activate(id);
     return enveloped(vehicle, 'Vehicle activated successfully');
@@ -195,10 +190,7 @@ export class VehiclesController {
   @ApiOperation({ summary: 'Delete a vehicle' })
   @ApiParam({ name: 'id', description: 'Vehicle UUID' })
   @ApiNoContentResponse({ description: 'Vehicle deleted successfully.' })
-  async remove(
-    @Param('id') id: string,
-    @CurrentUser() principal: Principal,
-  ) {
+  async remove(@Param('id') id: string, @CurrentUser() principal: Principal) {
     await this.assertOwnsVehicle(principal, id, 'delete your own vehicles');
     await this.vehiclesService.remove(id);
     // 204 carries no body — the object that used to be returned here was

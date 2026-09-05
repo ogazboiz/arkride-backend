@@ -13,14 +13,21 @@ import { PrivySignInDto, RefreshSessionDto } from './dto/privy-auth.dto';
 import type { Request } from 'express';
 import { RegisterDto } from './dto/register.dto';
 // import { GoogleAuthDto } from './dto/google-auth.dto';
-import { LoginDto } from './dto/login.dto'
+import { LoginDto } from './dto/login.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { Throttle } from '@nestjs/throttler';
-import { ApiBadRequestResponse, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-
+import {
+  ApiBadRequestResponse,
+  ApiBody,
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Auth')
 @Controller('api/v1/auth')
@@ -30,17 +37,25 @@ export class AuthController {
     private readonly privyAuthService: PrivyAuthService,
   ) {}
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('register')
   @ApiOperation({ summary: 'Register a new user account' })
   @ApiBody({ type: RegisterDto })
-  @ApiCreatedResponse({ description: 'Registration successful. OTP sent for verification.' })
+  @ApiCreatedResponse({
+    description: 'Registration successful. OTP sent for verification.',
+  })
   @ApiBadRequestResponse({ description: 'Invalid registration payload.' })
   async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto)
+    return this.authService.register(dto);
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify account with OTP' })
@@ -51,30 +66,42 @@ export class AuthController {
     return this.authService.verifyOtp(dto);
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Resend account verification OTP' })
   @ApiBody({ type: ResendOtpDto })
   @ApiOkResponse({ description: 'OTP resent successfully.' })
-  @ApiBadRequestResponse({ description: 'Unable to resend OTP for the supplied email.' })
+  @ApiBadRequestResponse({
+    description: 'Unable to resend OTP for the supplied email.',
+  })
   async resendOtp(@Body() dto: ResendOtpDto) {
     return this.authService.resendOtp(dto);
   }
 
   @Post('login')
+  @ApiOperation({ summary: 'Sign in with email and password' })
   @HttpCode(HttpStatus.OK)
   // Credential endpoint: a much tighter burst clamp than the app-wide one.
   // 5 attempts per minute, and 3 per second, per IP. The `short` and `medium`
   // names must match SecurityModule's throttlers — an override naming a
   // throttler that does not exist is silently ignored, which is what the
   // previous `{ short: ... }` was doing against a config that defined none.
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset OTP' })
@@ -85,7 +112,10 @@ export class AuthController {
     return this.authService.forgotPassword(dto);
   }
 
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 5, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 5, ttl: 60_000 },
+  })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reset password using OTP' })
@@ -113,7 +143,10 @@ export class AuthController {
    * at the door is far less surface than teaching all of them a second
    * credential format.
    */
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 10, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 10, ttl: 60_000 },
+  })
   @Post('privy')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Sign in with a Privy access token' })
@@ -139,7 +172,10 @@ export class AuthController {
    * The presented token is CONSUMED — every refresh rotates. See
    * RefreshToken for what happens when an already-consumed token turns up.
    */
-  @Throttle({ short: { limit: 3, ttl: 1_000 }, medium: { limit: 30, ttl: 60_000 } })
+  @Throttle({
+    short: { limit: 3, ttl: 1_000 },
+    medium: { limit: 30, ttl: 60_000 },
+  })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Exchange a refresh token for a new session' })
@@ -164,16 +200,15 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Revoke a session' })
+  @ApiNoContentResponse({ description: 'Session revoked. No body.' })
   @ApiBody({ type: RefreshSessionDto })
   async logout(@Body() dto: RefreshSessionDto): Promise<void> {
     await this.authService.logout(dto.refreshToken);
   }
-
 
   //   @Post('google')
   //   @HttpCode(HttpStatus.OK)
   //   async googleAuth(@Body() dto: GoogleAuthDto) {
   //     return this.authService.googleAuth(dto);
   //   }
-
 }

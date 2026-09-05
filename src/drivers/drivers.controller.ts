@@ -33,6 +33,7 @@ import { DriverLoginDto } from './dto/driver-login.dto';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -56,7 +57,7 @@ export class DriversController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Register a new driver' })
   @ApiBody({ type: CreateDriverDto })
-  @ApiOkResponse({ description: 'Driver registration successful.' })
+  @ApiCreatedResponse({ description: 'Driver registration successful.' })
   async create(@Body() createDriverDto: CreateDriverDto) {
     const result = await this.driversService.create(createDriverDto);
     // Spread the whole result. Cherry-picking `token` here silently dropped
@@ -82,6 +83,8 @@ export class DriversController {
   }
 
   @Get()
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'List all drivers (admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async findAll() {
@@ -97,6 +100,8 @@ export class DriversController {
    * wallet balance by iterating ids.
    */
   @Get(':id')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get a driver profile (own, or any for an admin)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER, Role.ADMIN)
   async findOne(@Param('id') id: string, @CurrentUser() principal: Principal) {
@@ -134,6 +139,8 @@ export class DriversController {
   }
 
   @Patch(':id/online-status')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Go online or offline (own account only)' })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DRIVER)
   async updateOnlineStatus(
@@ -175,6 +182,8 @@ export class DriversController {
   }
 
   @Patch(':id/verification-status')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: "Approve or reject a driver's licence (admin)" })
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   async updateVerificationStatus(
@@ -224,6 +233,7 @@ export class DriversController {
     medium: { limit: 5, ttl: 60_000 },
   })
   @Post('forgot-password')
+  @ApiOperation({ summary: 'Send a password-reset OTP to a driver' })
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: DriverForgotPasswordDto) {
     return await this.driversService.forgotPassword(dto);
@@ -234,6 +244,7 @@ export class DriversController {
     medium: { limit: 5, ttl: 60_000 },
   })
   @Post('reset-password')
+  @ApiOperation({ summary: 'Reset a driver password using an OTP' })
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: DriverResetPasswordDto) {
     return await this.driversService.resetPassword(dto);

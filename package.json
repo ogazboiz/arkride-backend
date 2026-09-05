@@ -17,7 +17,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json --forceExit --runInBand",
     "typeorm": "typeorm-ts-node-commonjs -d src/data-source.ts",
     "migration:generate": "pnpm run typeorm -- migration:generate",
     "migration:run": "pnpm run typeorm -- migration:run",
@@ -33,7 +33,9 @@
     "migration:show:prod": "npx typeorm -d dist/data-source.js migration:show",
     "schema:sync:dev": "ts-node scripts/dev/sync-schema.ts",
     "verify:stats": "ts-node scripts/dev/verify-stats.ts",
-    "verify:exploits": "node scripts/dev/exploit-suite.mjs"
+    "verify:exploits": "node scripts/dev/exploit-suite.mjs",
+    "verify:openapi": "node scripts/dev/verify-openapi.mjs",
+    "docs:export": "node scripts/dev/export-openapi.mjs"
   },
   "dependencies": {
     "@keyv/redis": "^5.1.6",

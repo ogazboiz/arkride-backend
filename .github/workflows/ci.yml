@@ -17,6 +17,15 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
       postgres:
         image: postgres:16-alpine
         env:
@@ -89,6 +98,29 @@ jobs:
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE arkrides_ci_stats;'
           pnpm verify:stats arkrides_ci_stats
+
+      # The OpenAPI document is only useful if it is true. This boots the app
+      # and asserts the documented shapes still match live responses — the
+      # drift it was written for made all 67 documented responses wrong at once.
+      - name: OpenAPI document matches reality
+        env:
+          NODE_ENV: development
+          PORT: 4010
+          JWT_SECRET: ci-only-secret-value-that-is-long-enough-0123456789
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USERNAME: postgres
+          DATABASE_PASSWORD: postgres
+          DATABASE_NAME: arkrides_ci
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: |
+          pnpm build
+          node dist/main.js &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4010/api-json >/dev/null && break || sleep 2
+          done
+          pnpm verify:openapi
 
       # Lint is REPORTED, not enforced. There is a large amount of pre-existing
       # lint debt in this repository that predates this workflow; failing the
